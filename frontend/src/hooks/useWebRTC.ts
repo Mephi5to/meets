@@ -221,30 +221,24 @@ export function useWebRTC(): WebRTCControls {
 
     // Handle incoming remote tracks.
     // ontrack fires once per track (audio and video separately).
-    // We maintain a single MediaStream per peer and add tracks to it so that
-    // VideoTile always receives a stream that will eventually contain both
-    // audio and video — even if the two ontrack events arrive in sequence.
+    // We always create a NEW MediaStream reference so React detects the
+    // state change on every ontrack event and VideoTile re-runs its effects
+    // (important when audio track arrives after the video track).
+    // Tracks are deduplicated by id to prevent double-add on re-negotiation.
     pc.ontrack = (e) => {
-      console.info(`[WebRTC] ontrack from ${peerId}: kind=${e.track.kind} streams=${e.streams.length}`)
+      console.info(`[WebRTC] ontrack from ${peerId}: kind=${e.track.kind}`)
 
       setRemotePeers((prev) => {
         const next = new Map(prev)
         const existing = next.get(peerId)
 
-        let remoteStream: MediaStream
+        const existingTracks = existing?.stream?.getTracks() ?? []
+        // Deduplicate: don't add a track that's already in the stream
+        const merged = existingTracks.some((t) => t.id === e.track.id)
+          ? existingTracks
+          : [...existingTracks, e.track]
 
-        if (existing?.stream) {
-          // Add the new track to the already-existing stream so the audio
-          // element (which depends on [stream] reference) will re-run its
-          // effect when the stream object reference changes.
-          // We create a NEW MediaStream so React detects the reference change.
-          remoteStream = new MediaStream(existing.stream.getTracks())
-          remoteStream.addTrack(e.track)
-        } else if (e.streams && e.streams.length > 0) {
-          remoteStream = e.streams[0]
-        } else {
-          remoteStream = new MediaStream([e.track])
-        }
+        const remoteStream = new MediaStream(merged)
 
         next.set(peerId, {
           connectionId: peerId,
