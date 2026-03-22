@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react'
 interface VideoTileProps {
   stream: MediaStream | null
   displayName: string
-  muted?: boolean       // true = suppress audio (local tile, prevent echo)
+  muted?: boolean
   audioEnabled?: boolean
   videoEnabled?: boolean
   isLocal?: boolean
@@ -21,55 +21,57 @@ export function VideoTile({
   className = '',
 }: VideoTileProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
-  // Separate audio element for remote peers.
-  // The <video> element is always muted (only used for video track display).
-  // Audio is routed through a dedicated <audio> element so Chrome autoplay
-  // policy for audio does not interfere with video playback (and vice versa).
   const audioRef = useRef<HTMLAudioElement>(null)
 
-  // ── Video track ────────────────────────────────────────────────────────────
-  // The video element is ALWAYS muted. We rely on it only for the picture.
+  // ── Video ──────────────────────────────────────────────────────────────────
+  // Always muted — audio is handled by a separate <audio> element below.
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
     if (stream) {
       video.srcObject = stream
-      video.muted = true
       video.play().catch((err) => {
-        if (err.name !== 'AbortError') {
-          console.warn('[VideoTile] video play():', err.name, err.message)
-        }
+        if (err.name !== 'AbortError') console.warn('[VideoTile] video play():', err.name)
       })
     } else {
       video.srcObject = null
     }
   }, [stream])
 
-  // ── Audio track ────────────────────────────────────────────────────────────
-  // Only attach audio for remote tiles (muted=false).
-  // Local tile always skips this to prevent feedback.
+  // ── Audio ──────────────────────────────────────────────────────────────────
+  // Separate <audio> element so Chrome autoplay policy for video never
+  // interferes with audio playback.
+  // We also listen for 'addtrack' on the stream so that audio tracks which
+  // arrive after the video track (second ontrack event) are picked up even
+  // when the stream object reference hasn't changed.
   useEffect(() => {
     const audio = audioRef.current
-    if (!audio) return
-
-    if (!muted && stream) {
-      // Build a stream that contains only the audio tracks so the <audio>
-      // element never receives video data (keeps things clean).
-      const audioTracks = stream.getAudioTracks()
-      if (audioTracks.length === 0) return
-
-      const audioOnlyStream = new MediaStream(audioTracks)
-      audio.srcObject = audioOnlyStream
-      audio.play().catch((err) => {
-        if (err.name !== 'AbortError') {
-          console.warn('[VideoTile] audio play():', err.name, err.message)
-        }
-      })
-    } else {
-      audio.srcObject = null
+    if (!audio || muted || !stream) {
+      if (audio) audio.srcObject = null
+      return
     }
 
+    function attachAudio() {
+      if (!audio || !stream) return
+      const tracks = stream.getAudioTracks()
+      if (tracks.length === 0) return
+      // Avoid restarting if we already have the same tracks
+      const current = (audio.srcObject as MediaStream | null)?.getAudioTracks() ?? []
+      if (current.length === tracks.length && current.every((t, i) => t.id === tracks[i].id)) return
+
+      const audioStream = new MediaStream(tracks)
+      audio.srcObject = audioStream
+      audio.play().catch((err) => {
+        if (err.name !== 'AbortError') console.warn('[VideoTile] audio play():', err.name)
+      })
+    }
+
+    attachAudio()
+
+    // If audio track hasn't arrived yet, catch it when the stream gains a track
+    stream.addEventListener('addtrack', attachAudio)
     return () => {
+      stream.removeEventListener('addtrack', attachAudio)
       if (audio) audio.srcObject = null
     }
   }, [stream, muted])
@@ -85,7 +87,6 @@ export function VideoTile({
     <div
       className={`relative bg-surface-800 rounded-xl overflow-hidden flex items-center justify-center ${className}`}
     >
-      {/* Video element — always muted, only displays video track */}
       <video
         ref={videoRef}
         autoPlay
@@ -94,10 +95,9 @@ export function VideoTile({
         className={`w-full h-full object-cover ${!videoEnabled ? 'hidden' : ''}`}
       />
 
-      {/* Hidden audio element — only used for remote peers (muted=false) */}
+      {/* Hidden audio element for remote peers */}
       {!muted && <audio ref={audioRef} autoPlay playsInline />}
 
-      {/* Avatar fallback when video is off */}
       {!videoEnabled && (
         <div className="flex flex-col items-center gap-2">
           <div className="w-16 h-16 rounded-full bg-blue-700 flex items-center justify-center text-white text-xl font-bold select-none">
@@ -107,7 +107,6 @@ export function VideoTile({
         </div>
       )}
 
-      {/* Name badge */}
       <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between">
         <span className="px-2 py-0.5 bg-black/50 backdrop-blur-sm rounded text-white text-xs font-medium truncate max-w-[calc(100%-2rem)]">
           {displayName}
@@ -127,7 +126,6 @@ export function VideoTile({
         </div>
       </div>
 
-      {/* Local indicator */}
       {isLocal && (
         <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-blue-600/80 rounded text-white text-[10px] font-medium">
           YOU
