@@ -52,27 +52,23 @@ export function ConferenceRoom({ roomId, displayName, onLeave }: ConferenceRoomP
 
   const signalingRef = useRef<SignalingControls | null>(null)
 
-  const onParticipantJoined = useCallback(
-    async (event: ParticipantJoinedEvent) => {
-      const { participant } = event
-      if (!turnCredsRef.current || !signalingRef.current) return
+  // Store participant names so onReceiveOffer can use the correct display name
+  const pendingNamesRef = useRef<Map<string, string>>(new Map())
 
-      const sdp = await webrtc.createOffer(
-        participant.connectionId,
-        participant.displayName,
-        turnCredsRef.current,
-        (candidate) => {
-          signalingRef.current?.sendIceCandidate(
-            participant.connectionId,
-            candidate.candidate,
-            candidate.sdpMid ?? null,
-            candidate.sdpMLineIndex ?? null
-          )
-        }
+  // When a new participant joins, the SERVER already notified the joiner to
+  // send us an offer (via their existingParticipants list). We must NOT
+  // create an offer here — that causes "glare": both sides become offerers,
+  // the second createPeerConnection overwrites the first in peerConnectionsRef,
+  // and handleAnswer fails with "wrong state: stable".
+  // Just cache the display name so onReceiveOffer can label them correctly.
+  const onParticipantJoined = useCallback(
+    (event: ParticipantJoinedEvent) => {
+      pendingNamesRef.current.set(
+        event.participant.connectionId,
+        event.participant.displayName
       )
-      await signalingRef.current.sendOffer(participant.connectionId, sdp)
     },
-    [webrtc.createOffer]
+    []
   )
 
   const onParticipantLeft = useCallback(
@@ -86,9 +82,12 @@ export function ConferenceRoom({ roomId, displayName, onLeave }: ConferenceRoomP
     async (fromConnectionId: string, offerSdp: string) => {
       if (!turnCredsRef.current || !signalingRef.current) return
 
+      const displayName = pendingNamesRef.current.get(fromConnectionId) ?? ''
+      pendingNamesRef.current.delete(fromConnectionId)
+
       const answerSdp = await webrtc.handleOffer(
         fromConnectionId,
-        '',
+        displayName,
         offerSdp,
         turnCredsRef.current,
         (candidate) => {
