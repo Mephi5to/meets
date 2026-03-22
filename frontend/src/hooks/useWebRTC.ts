@@ -52,15 +52,6 @@ function buildIceConfig(creds: TurnCredentials): RTCConfiguration {
   }
 }
 
-async function withRelayOnlyCheck(pc: RTCPeerConnection): Promise<void> {
-  // Belt-and-suspenders: verify that no non-relay candidates slip through
-  // (iceTransportPolicy:'relay' should guarantee this, but we log if it doesn't)
-  pc.addEventListener('icecandidateerror', (e) => {
-    const err = e as RTCPeerConnectionIceErrorEvent
-    console.warn('ICE candidate error:', err.errorCode, err.errorText, err.url)
-  })
-}
-
 export function useWebRTC(): WebRTCControls {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [remotePeers, setRemotePeers] = useState<Map<string, RemotePeer>>(new Map())
@@ -71,6 +62,13 @@ export function useWebRTC(): WebRTCControls {
   const localStreamRef = useRef<MediaStream | null>(null)
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
   const screenStreamRef = useRef<MediaStream | null>(null)
+
+  // Per-peer ICE candidate queue: buffers candidates that arrive before
+  // setRemoteDescription() completes. Flushed in handleAnswer / handleOffer
+  // after remote description is committed.
+  const iceCandidateQueues = useRef<Map<string, RTCIceCandidateInit[]>>(new Map())
+  // Tracks which peers have their remote description set and are ready for candidates
+  const remoteDescReady = useRef<Set<string>>(new Set())
 
   // ─── Local media ──────────────────────────────────────────────────────────
 
@@ -170,6 +168,21 @@ export function useWebRTC(): WebRTCControls {
     }
   }, [screenSharing])
 
+  // ─── ICE candidate queue helpers ──────────────────────────────────────────
+
+  async function flushIceCandidateQueue(peerId: string, pc: RTCPeerConnection) {
+    remoteDescReady.current.add(peerId)
+    const queue = iceCandidateQueues.current.get(peerId) ?? []
+    iceCandidateQueues.current.delete(peerId)
+    for (const init of queue) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(init))
+      } catch (err) {
+        console.warn(`[ICE flush] Failed to add buffered candidate for ${peerId}:`, err)
+      }
+    }
+  }
+
   // ─── Peer connection factory ───────────────────────────────────────────────
 
   function createPeerConnection(
@@ -182,7 +195,14 @@ export function useWebRTC(): WebRTCControls {
     const pc = new RTCPeerConnection(config)
     peerConnectionsRef.current.set(peerId, pc)
 
-    withRelayOnlyCheck(pc)
+    // Reset per-peer ICE state
+    iceCandidateQueues.current.set(peerId, [])
+    remoteDescReady.current.delete(peerId)
+
+    pc.addEventListener('icecandidateerror', (e) => {
+      const err = e as RTCPeerConnectionIceErrorEvent
+      console.warn('ICE candidate error:', err.errorCode, err.errorText, err.url)
+    })
 
     // Add local tracks to the connection
     const stream = localStreamRef.current
@@ -192,50 +212,55 @@ export function useWebRTC(): WebRTCControls {
       })
     }
 
-    // Emit ICE candidates (will be relay-only due to iceTransportPolicy)
+    // Emit ICE candidates
     pc.onicecandidate = (e) => {
       if (e.candidate) {
         onIceCandidate(e.candidate)
       }
     }
 
-    // Handle incoming remote tracks
+    // Handle incoming remote tracks.
+    // e.streams[0] is populated when the sender uses addTrack(track, stream).
+    // As a fallback, build a stream manually from the track so we never set
+    // srcObject to undefined/null when a valid track arrives.
     pc.ontrack = (e) => {
-      const [remoteStream] = e.streams
       setRemotePeers((prev) => {
         const next = new Map(prev)
         const existing = next.get(peerId)
-        if (existing) {
-          next.set(peerId, { ...existing, stream: remoteStream })
+
+        let remoteStream: MediaStream
+        if (e.streams && e.streams.length > 0) {
+          remoteStream = e.streams[0]
+        } else if (existing?.stream) {
+          // No stream in the event but we already have one — add track to it
+          existing.stream.addTrack(e.track)
+          remoteStream = existing.stream
         } else {
-          next.set(peerId, {
-            connectionId: peerId,
-            displayName: peerName,
-            pc,
-            stream: remoteStream,
-            audioEnabled: true,
-            videoEnabled: true,
-          })
+          remoteStream = new MediaStream([e.track])
         }
+
+        next.set(peerId, {
+          connectionId: peerId,
+          displayName: existing?.displayName ?? peerName,
+          pc,
+          stream: remoteStream,
+          audioEnabled: existing?.audioEnabled ?? true,
+          videoEnabled: existing?.videoEnabled ?? true,
+        })
         return next
       })
     }
 
     pc.onconnectionstatechange = () => {
-      console.info(`Peer ${peerId} connection state: ${pc.connectionState}`)
-      if (
-        pc.connectionState === 'failed' ||
-        pc.connectionState === 'disconnected'
-      ) {
-        // Attempt ICE restart
-        if (pc.connectionState === 'failed') {
-          pc.restartIce()
-        }
+      console.info(`[WebRTC] Peer ${peerId} connection: ${pc.connectionState}`)
+      if (pc.connectionState === 'failed') {
+        console.warn(`[WebRTC] ICE failed for ${peerId}, attempting restart`)
+        pc.restartIce()
       }
     }
 
     pc.oniceconnectionstatechange = () => {
-      console.info(`Peer ${peerId} ICE state: ${pc.iceConnectionState}`)
+      console.info(`[WebRTC] Peer ${peerId} ICE: ${pc.iceConnectionState}`)
     }
 
     return pc
@@ -272,9 +297,7 @@ export function useWebRTC(): WebRTCControls {
         offerToReceiveVideo: true,
       })
 
-      // Prefer VP8 codec for lower CPU usage on weak connections
       offer.sdp = preferVP8(offer.sdp ?? '')
-
       await pc.setLocalDescription(offer)
       return offer.sdp!
     },
@@ -307,6 +330,10 @@ export function useWebRTC(): WebRTCControls {
       })
 
       await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: offerSdp }))
+
+      // Remote description is now set — flush any buffered ICE candidates
+      await flushIceCandidateQueue(peerId, pc)
+
       const answer = await pc.createAnswer()
       answer.sdp = preferVP8(answer.sdp ?? '')
       await pc.setLocalDescription(answer)
@@ -320,16 +347,30 @@ export function useWebRTC(): WebRTCControls {
     const pc = peerConnectionsRef.current.get(peerId)
     if (!pc) return
     await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: answerSdp }))
+
+    // Remote description is now set — flush any buffered ICE candidates
+    await flushIceCandidateQueue(peerId, pc)
   }, [])
 
   const handleIceCandidate = useCallback(
     async (peerId: string, candidateInit: RTCIceCandidateInit) => {
       const pc = peerConnectionsRef.current.get(peerId)
       if (!pc) return
+
+      // If remote description isn't set yet, buffer the candidate.
+      // Dropping it would silently break ICE negotiation.
+      if (!remoteDescReady.current.has(peerId)) {
+        const queue = iceCandidateQueues.current.get(peerId) ?? []
+        queue.push(candidateInit)
+        iceCandidateQueues.current.set(peerId, queue)
+        console.debug(`[ICE] Buffered candidate for ${peerId} (remote desc not ready yet)`)
+        return
+      }
+
       try {
         await pc.addIceCandidate(new RTCIceCandidate(candidateInit))
       } catch (err) {
-        console.warn('Failed to add ICE candidate:', err)
+        console.warn('[ICE] Failed to add candidate:', err)
       }
     },
     []
@@ -341,6 +382,8 @@ export function useWebRTC(): WebRTCControls {
       pc.close()
       peerConnectionsRef.current.delete(peerId)
     }
+    iceCandidateQueues.current.delete(peerId)
+    remoteDescReady.current.delete(peerId)
     setRemotePeers((prev) => {
       const next = new Map(prev)
       next.delete(peerId)
@@ -353,6 +396,8 @@ export function useWebRTC(): WebRTCControls {
     return () => {
       peerConnectionsRef.current.forEach((pc) => pc.close())
       peerConnectionsRef.current.clear()
+      iceCandidateQueues.current.clear()
+      remoteDescReady.current.clear()
     }
   }, [])
 
