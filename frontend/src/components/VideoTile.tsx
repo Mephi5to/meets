@@ -24,7 +24,9 @@ export function VideoTile({
   const audioRef = useRef<HTMLAudioElement>(null)
 
   // ── Video ──────────────────────────────────────────────────────────────────
-  // Always muted — audio is handled by a separate <audio> element below.
+  // <video> is always muted — audio is handled by a separate <audio> element.
+  // autoPlay handles the case where srcObject is set before the effect runs;
+  // the explicit play() call is a belt-and-suspenders fallback.
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
@@ -39,11 +41,12 @@ export function VideoTile({
   }, [stream])
 
   // ── Audio ──────────────────────────────────────────────────────────────────
-  // Separate <audio> element so Chrome autoplay policy for video never
-  // interferes with audio playback.
-  // We also listen for 'addtrack' on the stream so that audio tracks which
-  // arrive after the video track (second ontrack event) are picked up even
-  // when the stream object reference hasn't changed.
+  // Separate <audio> element (no autoPlay attribute) so there is no race
+  // between the browser's autoplay trigger and our explicit play() call.
+  //
+  // The ontrack handler in useWebRTC now creates a NEW MediaStream reference
+  // on every event, so this effect re-runs reliably for every incoming track.
+  // The addtrack listener is kept as a belt-and-suspenders for any edge cases.
   useEffect(() => {
     const audio = audioRef.current
     if (!audio || muted || !stream) {
@@ -55,21 +58,34 @@ export function VideoTile({
       if (!audio || !stream) return
       const tracks = stream.getAudioTracks()
       if (tracks.length === 0) return
-      // Avoid restarting if we already have the same tracks
-      const current = (audio.srcObject as MediaStream | null)?.getAudioTracks() ?? []
-      if (current.length === tracks.length && current.every((t, i) => t.id === tracks[i].id)) return
 
-      const audioStream = new MediaStream(tracks)
-      audio.srcObject = audioStream
+      // Skip if we are already playing these exact tracks
+      const current = (audio.srcObject as MediaStream | null)?.getAudioTracks() ?? []
+      if (
+        current.length === tracks.length &&
+        current.every((t, i) => t.id === tracks[i].id)
+      )
+        return
+
+      audio.srcObject = new MediaStream(tracks)
       audio.play().catch((err) => {
-        if (err.name !== 'AbortError') console.warn('[VideoTile] audio play():', err.name)
+        if (err.name === 'NotAllowedError') {
+          // Autoplay blocked — retry on the very next user interaction.
+          // This can happen if the ICE connection takes long enough that the
+          // browser's user-gesture token has expired by the time ontrack fires.
+          const unlock = () => {
+            audio.play().catch(() => {})
+          }
+          document.addEventListener('click', unlock, { once: true })
+        } else if (err.name !== 'AbortError') {
+          console.warn('[VideoTile] audio play():', err.name, err.message)
+        }
       })
     }
 
     attachAudio()
-
-    // If audio track hasn't arrived yet, catch it when the stream gains a track
     stream.addEventListener('addtrack', attachAudio)
+
     return () => {
       stream.removeEventListener('addtrack', attachAudio)
       if (audio) audio.srcObject = null
@@ -95,8 +111,9 @@ export function VideoTile({
         className={`w-full h-full object-cover ${!videoEnabled ? 'hidden' : ''}`}
       />
 
-      {/* Hidden audio element for remote peers */}
-      {!muted && <audio ref={audioRef} autoPlay playsInline />}
+      {/* Audio-only element for remote peers — no autoPlay to avoid
+          racing with the explicit play() call in the effect above */}
+      {!muted && <audio ref={audioRef} playsInline />}
 
       {!videoEnabled && (
         <div className="flex flex-col items-center gap-2">

@@ -189,19 +189,30 @@ export function useWebRTC(): WebRTCControls {
       if (e.candidate) onIceCandidate(e.candidate)
     }
 
-    // ontrack: use e.streams[0] which Chrome populates when addTrack(track, stream)
-    // was called on the sender. The same stream object appears on both ontrack events
-    // (audio and video), so VideoTile uses stream.onaddtrack to catch late tracks.
+    // ontrack fires once per track (audio + video = 2 events).
+    // e.streams[0] is the SAME object reference for both events in Chrome,
+    // so relying on it alone means React won't detect a change on the second event
+    // and VideoTile's audio effect won't re-run to pick up the audio track.
+    //
+    // Fix: always build a NEW MediaStream from a deduplicated union of
+    //   • tracks already in the existing peer stream
+    //   • tracks in e.streams[0]  (Chrome often bundles both tracks here early)
+    //   • the current e.track itself
+    // This guarantees a new reference every time, React always re-renders,
+    // and VideoTile always sees the latest set of tracks.
     pc.ontrack = (e) => {
       console.info(`[WebRTC] ontrack peer=${peerId} kind=${e.track.kind} streams=${e.streams.length}`)
-      const remoteStream = e.streams[0]
-      if (!remoteStream) {
-        console.warn('[WebRTC] ontrack: e.streams[0] is empty, skipping')
-        return
-      }
       setRemotePeers((prev) => {
         const next = new Map(prev)
         const existing = next.get(peerId)
+
+        const trackMap = new Map<string, MediaStreamTrack>()
+        existing?.stream?.getTracks().forEach((t) => trackMap.set(t.id, t))
+        e.streams[0]?.getTracks().forEach((t) => trackMap.set(t.id, t))
+        trackMap.set(e.track.id, e.track)
+
+        const remoteStream = new MediaStream([...trackMap.values()])
+
         next.set(peerId, {
           connectionId: peerId,
           displayName: existing?.displayName ?? peerName,
