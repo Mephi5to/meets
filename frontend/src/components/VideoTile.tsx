@@ -41,6 +41,15 @@ export function VideoTile({
     }
   }, [stream])
 
+  // React has a long-standing bug where muted={false} does not remove the
+  // `muted` attribute from the DOM, leaving remote video elements silently
+  // muted. Set the property imperatively via the ref instead.
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.muted = muted
+    }
+  }, [muted])
+
   const initials = displayName
     .split(' ')
     .map((w) => w[0])
@@ -57,7 +66,6 @@ export function VideoTile({
         ref={videoRef}
         autoPlay
         playsInline
-        muted={muted}
         className={`w-full h-full object-cover ${!videoEnabled ? 'hidden' : ''}`}
       />
 
