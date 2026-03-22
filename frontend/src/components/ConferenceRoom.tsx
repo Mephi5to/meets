@@ -291,6 +291,7 @@ export function ConferenceRoom({ roomId, displayName, onLeave }: ConferenceRoomP
         audioEnabled={webrtc.audioEnabled}
         videoEnabled={webrtc.videoEnabled}
         screenSharing={webrtc.screenSharing}
+        roomId={roomId}
         onToggleAudio={webrtc.toggleAudio}
         onToggleVideo={webrtc.toggleVideo}
         onToggleScreenShare={webrtc.toggleScreenShare}

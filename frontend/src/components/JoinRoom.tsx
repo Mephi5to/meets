@@ -4,10 +4,11 @@ import { api } from '../services/api'
 
 interface JoinRoomProps {
   onJoin: (roomId: string, displayName: string) => void
+  initialRoomId?: string
 }
 
-export function JoinRoom({ onJoin }: JoinRoomProps) {
-  const [roomId, setRoomId] = useState('')
+export function JoinRoom({ onJoin, initialRoomId = '' }: JoinRoomProps) {
+  const [roomId, setRoomId] = useState(initialRoomId)
   const [displayName, setDisplayName] = useState('')
   const [participantCount, setParticipantCount] = useState<number | null>(null)
   const [copied, setCopied] = useState(false)
@@ -45,7 +46,9 @@ export function JoinRoom({ onJoin }: JoinRoomProps) {
   }
 
   async function handleCopy() {
-    await navigator.clipboard.writeText(roomId.toUpperCase())
+    const url = new URL(window.location.href)
+    url.searchParams.set('room', roomId.toUpperCase())
+    await navigator.clipboard.writeText(url.toString())
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -145,7 +148,7 @@ export function JoinRoom({ onJoin }: JoinRoomProps) {
               )}
 
               {copied && (
-                <p className="mt-1.5 text-xs text-green-400">Room ID copied!</p>
+                <p className="mt-1.5 text-xs text-green-400">Link copied!</p>
               )}
             </div>
 

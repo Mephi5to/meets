@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ConferenceRoom } from './components/ConferenceRoom'
 import { JoinRoom } from './components/JoinRoom'
 
@@ -7,7 +7,26 @@ type AppState =
   | { screen: 'room'; roomId: string; displayName: string }
 
 export default function App() {
-  const [appState, setAppState] = useState<AppState>({ screen: 'join' })
+  const [appState, setAppState] = useState<AppState>(() => {
+    // Pre-fill room ID from ?room=... query parameter so shared links work.
+    const params = new URLSearchParams(window.location.search)
+    const roomId = params.get('room')?.trim().toUpperCase()
+    return roomId ? { screen: 'join', initialRoomId: roomId } as AppState : { screen: 'join' }
+  })
+
+  // Keep the URL in sync with the current room so the browser back button
+  // and copy-paste of the address bar both work correctly.
+  useEffect(() => {
+    if (appState.screen === 'room') {
+      const url = new URL(window.location.href)
+      url.searchParams.set('room', appState.roomId)
+      window.history.replaceState(null, '', url.toString())
+    } else {
+      const url = new URL(window.location.href)
+      url.searchParams.delete('room')
+      window.history.replaceState(null, '', url.toString())
+    }
+  }, [appState])
 
   function handleJoin(roomId: string, displayName: string) {
     setAppState({ screen: 'room', roomId, displayName })
@@ -27,5 +46,8 @@ export default function App() {
     )
   }
 
-  return <JoinRoom onJoin={handleJoin} />
+  const params = new URLSearchParams(window.location.search)
+  const initialRoomId = params.get('room')?.trim().toUpperCase() ?? ''
+
+  return <JoinRoom onJoin={handleJoin} initialRoomId={initialRoomId} />
 }
