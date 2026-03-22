@@ -8,6 +8,7 @@ import type {
   ParticipantLeftEvent,
   TurnCredentials,
 } from '../types'
+import { resumeAudioContext } from '../utils/audioContext'
 import { Controls } from './Controls'
 import { DiagnosticsOverlay } from './DiagnosticsOverlay'
 import { VideoGrid } from './VideoGrid'
@@ -145,6 +146,12 @@ export function ConferenceRoom({ roomId, displayName, onLeave }: ConferenceRoomP
 
     async function join() {
       try {
+        // 0. Unlock the shared AudioContext while we still have user-gesture
+        //    credit from the "Join Room" click.  Remote audio is routed through
+        //    this context (Web Audio API), so it must be in "running" state
+        //    before any remote tracks arrive.
+        resumeAudioContext()
+
         // 1. Start local media first so the user sees their camera immediately
         await webrtc.startLocalMedia()
         if (cancelled) return
@@ -247,7 +254,9 @@ export function ConferenceRoom({ roomId, displayName, onLeave }: ConferenceRoomP
   const peers = Array.from(webrtc.remotePeers.values())
 
   return (
-    <div className="min-h-screen bg-surface-900 flex flex-col">
+    // resumeAudioContext on any click is a belt-and-suspenders fallback in
+    // case the context was created in suspended state on the first render.
+    <div className="min-h-screen bg-surface-900 flex flex-col" onClick={resumeAudioContext}>
       {/* Header */}
       <div className="h-12 flex items-center justify-between px-4 border-b border-white/10">
         <div className="flex items-center gap-2">

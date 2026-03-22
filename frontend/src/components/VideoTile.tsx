@@ -1,5 +1,6 @@
 import { MicOff, VideoOff } from 'lucide-react'
 import { useEffect, useRef } from 'react'
+import { getAudioContext } from '../utils/audioContext'
 
 interface VideoTileProps {
   stream: MediaStream | null
@@ -21,12 +22,10 @@ export function VideoTile({
   className = '',
 }: VideoTileProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
-  const audioRef = useRef<HTMLAudioElement>(null)
+  // Tracks the Web Audio source node so we can disconnect it on cleanup.
+  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null)
 
   // ── Video ──────────────────────────────────────────────────────────────────
-  // <video> is always muted — audio is handled by a separate <audio> element.
-  // autoPlay handles the case where srcObject is set before the effect runs;
-  // the explicit play() call is a belt-and-suspenders fallback.
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
@@ -40,55 +39,31 @@ export function VideoTile({
     }
   }, [stream])
 
-  // ── Audio ──────────────────────────────────────────────────────────────────
-  // Separate <audio> element (no autoPlay attribute) so there is no race
-  // between the browser's autoplay trigger and our explicit play() call.
-  //
-  // The ontrack handler in useWebRTC now creates a NEW MediaStream reference
-  // on every event, so this effect re-runs reliably for every incoming track.
-  // The addtrack listener is kept as a belt-and-suspenders for any edge cases.
+  // ── Audio via Web Audio API ────────────────────────────────────────────────
+  // We route remote audio through AudioContext instead of an <audio> element.
+  // This bypasses Chrome's autoplay restrictions entirely: once the context is
+  // resumed (done in ConferenceRoom right after the Join click), any source
+  // connected to it plays immediately without needing a separate user gesture.
   useEffect(() => {
-    const audio = audioRef.current
-    if (!audio || muted || !stream) {
-      if (audio) audio.srcObject = null
-      return
+    // Disconnect any previous source
+    if (sourceNodeRef.current) {
+      sourceNodeRef.current.disconnect()
+      sourceNodeRef.current = null
     }
 
-    function attachAudio() {
-      if (!audio || !stream) return
-      const tracks = stream.getAudioTracks()
-      if (tracks.length === 0) return
+    if (muted || !stream) return
 
-      // Skip if we are already playing these exact tracks
-      const current = (audio.srcObject as MediaStream | null)?.getAudioTracks() ?? []
-      if (
-        current.length === tracks.length &&
-        current.every((t, i) => t.id === tracks[i].id)
-      )
-        return
+    const audioTracks = stream.getAudioTracks()
+    if (audioTracks.length === 0) return
 
-      audio.srcObject = new MediaStream(tracks)
-      audio.play().catch((err) => {
-        if (err.name === 'NotAllowedError') {
-          // Autoplay blocked — retry on the very next user interaction.
-          // This can happen if the ICE connection takes long enough that the
-          // browser's user-gesture token has expired by the time ontrack fires.
-          const unlock = () => {
-            audio.play().catch(() => {})
-          }
-          document.addEventListener('click', unlock, { once: true })
-        } else if (err.name !== 'AbortError') {
-          console.warn('[VideoTile] audio play():', err.name, err.message)
-        }
-      })
-    }
-
-    attachAudio()
-    stream.addEventListener('addtrack', attachAudio)
+    const ctx = getAudioContext()
+    const source = ctx.createMediaStreamSource(new MediaStream(audioTracks))
+    source.connect(ctx.destination)
+    sourceNodeRef.current = source
 
     return () => {
-      stream.removeEventListener('addtrack', attachAudio)
-      if (audio) audio.srcObject = null
+      source.disconnect()
+      sourceNodeRef.current = null
     }
   }, [stream, muted])
 
@@ -110,10 +85,6 @@ export function VideoTile({
         muted
         className={`w-full h-full object-cover ${!videoEnabled ? 'hidden' : ''}`}
       />
-
-      {/* Audio-only element for remote peers — no autoPlay to avoid
-          racing with the explicit play() call in the effect above */}
-      {!muted && <audio ref={audioRef} playsInline />}
 
       {!videoEnabled && (
         <div className="flex flex-col items-center gap-2">
