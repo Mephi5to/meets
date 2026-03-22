@@ -220,21 +220,28 @@ export function useWebRTC(): WebRTCControls {
     }
 
     // Handle incoming remote tracks.
-    // e.streams[0] is populated when the sender uses addTrack(track, stream).
-    // As a fallback, build a stream manually from the track so we never set
-    // srcObject to undefined/null when a valid track arrives.
+    // ontrack fires once per track (audio and video separately).
+    // We maintain a single MediaStream per peer and add tracks to it so that
+    // VideoTile always receives a stream that will eventually contain both
+    // audio and video — even if the two ontrack events arrive in sequence.
     pc.ontrack = (e) => {
+      console.info(`[WebRTC] ontrack from ${peerId}: kind=${e.track.kind} streams=${e.streams.length}`)
+
       setRemotePeers((prev) => {
         const next = new Map(prev)
         const existing = next.get(peerId)
 
         let remoteStream: MediaStream
-        if (e.streams && e.streams.length > 0) {
+
+        if (existing?.stream) {
+          // Add the new track to the already-existing stream so the audio
+          // element (which depends on [stream] reference) will re-run its
+          // effect when the stream object reference changes.
+          // We create a NEW MediaStream so React detects the reference change.
+          remoteStream = new MediaStream(existing.stream.getTracks())
+          remoteStream.addTrack(e.track)
+        } else if (e.streams && e.streams.length > 0) {
           remoteStream = e.streams[0]
-        } else if (existing?.stream) {
-          // No stream in the event but we already have one — add track to it
-          existing.stream.addTrack(e.track)
-          remoteStream = existing.stream
         } else {
           remoteStream = new MediaStream([e.track])
         }

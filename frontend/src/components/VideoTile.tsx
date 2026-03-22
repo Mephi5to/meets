@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react'
 interface VideoTileProps {
   stream: MediaStream | null
   displayName: string
-  muted?: boolean       // mute the <video> element (always mute local to prevent echo)
+  muted?: boolean       // true = suppress audio (local tile, prevent echo)
   audioEnabled?: boolean
   videoEnabled?: boolean
   isLocal?: boolean
@@ -21,49 +21,58 @@ export function VideoTile({
   className = '',
 }: VideoTileProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
+  // Separate audio element for remote peers.
+  // The <video> element is always muted (only used for video track display).
+  // Audio is routed through a dedicated <audio> element so Chrome autoplay
+  // policy for audio does not interfere with video playback (and vice versa).
+  const audioRef = useRef<HTMLAudioElement>(null)
 
-  // Keep a ref to the latest muted value so the stream effect can read it
-  // without being listed as a dependency (which would restart playback on
-  // every mute toggle).
-  const mutedRef = useRef(muted)
-  mutedRef.current = muted
-
-  // Stream assignment + play.
-  // Chrome's autoplay policy allows muted autoplay but suppresses unmuted
-  // audio. The trick: start muted so play() is always allowed, then restore
-  // the correct muted state after the promise resolves so audio plays.
+  // ── Video track ────────────────────────────────────────────────────────────
+  // The video element is ALWAYS muted. We rely on it only for the picture.
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
     if (stream) {
       video.srcObject = stream
-      video.muted = true          // allow autoplay under Chrome's policy
-      video.play()
-        .then(() => {
-          // Playback started — now apply the real muted state.
-          // For local tiles (muted=true) this keeps echo suppressed.
-          // For remote tiles (muted=false) this unmutes and audio plays.
-          video.muted = mutedRef.current
-        })
-        .catch((err) => {
-          // AbortError = srcObject replaced before play() resolved — harmless.
-          if (err.name !== 'AbortError') {
-            console.warn('[VideoTile] play() blocked:', err.name, err.message)
-          }
-        })
+      video.muted = true
+      video.play().catch((err) => {
+        if (err.name !== 'AbortError') {
+          console.warn('[VideoTile] video play():', err.name, err.message)
+        }
+      })
     } else {
       video.srcObject = null
     }
   }, [stream])
 
-  // Reflect muted prop changes (e.g. user clicks mute button) imperatively.
-  // React has a long-standing bug where muted={false} does not remove the
-  // DOM attribute, so we never rely on the JSX prop for this.
+  // ── Audio track ────────────────────────────────────────────────────────────
+  // Only attach audio for remote tiles (muted=false).
+  // Local tile always skips this to prevent feedback.
   useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.muted = muted
+    const audio = audioRef.current
+    if (!audio) return
+
+    if (!muted && stream) {
+      // Build a stream that contains only the audio tracks so the <audio>
+      // element never receives video data (keeps things clean).
+      const audioTracks = stream.getAudioTracks()
+      if (audioTracks.length === 0) return
+
+      const audioOnlyStream = new MediaStream(audioTracks)
+      audio.srcObject = audioOnlyStream
+      audio.play().catch((err) => {
+        if (err.name !== 'AbortError') {
+          console.warn('[VideoTile] audio play():', err.name, err.message)
+        }
+      })
+    } else {
+      audio.srcObject = null
     }
-  }, [muted])
+
+    return () => {
+      if (audio) audio.srcObject = null
+    }
+  }, [stream, muted])
 
   const initials = displayName
     .split(' ')
@@ -76,13 +85,17 @@ export function VideoTile({
     <div
       className={`relative bg-surface-800 rounded-xl overflow-hidden flex items-center justify-center ${className}`}
     >
-      {/* Video element — muted is managed imperatively via ref, not via JSX prop */}
+      {/* Video element — always muted, only displays video track */}
       <video
         ref={videoRef}
         autoPlay
         playsInline
+        muted
         className={`w-full h-full object-cover ${!videoEnabled ? 'hidden' : ''}`}
       />
+
+      {/* Hidden audio element — only used for remote peers (muted=false) */}
+      {!muted && <audio ref={audioRef} autoPlay playsInline />}
 
       {/* Avatar fallback when video is off */}
       {!videoEnabled && (
