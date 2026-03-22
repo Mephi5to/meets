@@ -16,11 +16,11 @@ services:
     command: >
       -n
       --listening-port=3478
-      --tls-listening-port=5349
       --realm=${VPS_IP}
       --use-auth-secret
       --static-auth-secret=${TURN_SECRET}
       --external-ip=${VPS_IP}
+      --no-tls
       --no-dtls
       --no-loopback-peers
       --no-multicast-peers
