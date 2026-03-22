@@ -83,7 +83,7 @@ export function VideoTile({
         autoPlay
         playsInline
         muted
-        className={`w-full h-full object-cover ${!videoEnabled ? 'hidden' : ''} ${isLocal ? '[transform:scaleX(-1)]' : ''}`}
+        className={`w-full h-full object-cover [transform:scaleX(-1)] ${!videoEnabled ? 'hidden' : ''}`}
       />
 
       {!videoEnabled && (
