@@ -22,28 +22,43 @@ export function VideoTile({
 }: VideoTileProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
 
+  // Keep a ref to the latest muted value so the stream effect can read it
+  // without being listed as a dependency (which would restart playback on
+  // every mute toggle).
+  const mutedRef = useRef(muted)
+  mutedRef.current = muted
+
+  // Stream assignment + play.
+  // Chrome's autoplay policy allows muted autoplay but suppresses unmuted
+  // audio. The trick: start muted so play() is always allowed, then restore
+  // the correct muted state after the promise resolves so audio plays.
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
     if (stream) {
       video.srcObject = stream
-      // autoPlay attribute alone is not reliable when srcObject is set
-      // programmatically after mount — call play() explicitly.
-      video.play().catch((err) => {
-        // NotAllowedError = browser blocked autoplay; user interaction will unblock.
-        // AbortError = srcObject was replaced before play() resolved — harmless.
-        if (err.name !== 'AbortError') {
-          console.warn('[VideoTile] play() blocked:', err.name, err.message)
-        }
-      })
+      video.muted = true          // allow autoplay under Chrome's policy
+      video.play()
+        .then(() => {
+          // Playback started — now apply the real muted state.
+          // For local tiles (muted=true) this keeps echo suppressed.
+          // For remote tiles (muted=false) this unmutes and audio plays.
+          video.muted = mutedRef.current
+        })
+        .catch((err) => {
+          // AbortError = srcObject replaced before play() resolved — harmless.
+          if (err.name !== 'AbortError') {
+            console.warn('[VideoTile] play() blocked:', err.name, err.message)
+          }
+        })
     } else {
       video.srcObject = null
     }
   }, [stream])
 
+  // Reflect muted prop changes (e.g. user clicks mute button) imperatively.
   // React has a long-standing bug where muted={false} does not remove the
-  // `muted` attribute from the DOM, leaving remote video elements silently
-  // muted. Set the property imperatively via the ref instead.
+  // DOM attribute, so we never rely on the JSX prop for this.
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.muted = muted
@@ -61,7 +76,7 @@ export function VideoTile({
     <div
       className={`relative bg-surface-800 rounded-xl overflow-hidden flex items-center justify-center ${className}`}
     >
-      {/* Video element */}
+      {/* Video element — muted is managed imperatively via ref, not via JSX prop */}
       <video
         ref={videoRef}
         autoPlay
