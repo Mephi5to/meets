@@ -42,7 +42,7 @@ services:
       - Turn__Secret=${TURN_SECRET}
       - Turn__TlsPort=5349
       - Turn__UdpPort=3478
-      - Cors__AllowedOrigins__0=https://${VPS_IP}
+      - Cors__AllowedOrigins__0=${DOMAIN:-https://${VPS_IP}}
 
   # ── React frontend served by nginx ──────────────────────────────────────
   # nginx also reverse-proxies /api/ and /hub/ → backend:5000
