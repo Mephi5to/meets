@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ConferenceRoom } from './components/ConferenceRoom'
 import { JoinRoom } from './components/JoinRoom'
 
@@ -14,6 +14,8 @@ export default function App() {
     return roomId ? { screen: 'join', initialRoomId: roomId } as AppState : { screen: 'join' }
   })
 
+  const initialStreamRef = useRef<MediaStream | null>(null)
+
   // Keep the URL in sync with the current room so the browser back button
   // and copy-paste of the address bar both work correctly.
   useEffect(() => {
@@ -28,11 +30,13 @@ export default function App() {
     }
   }, [appState])
 
-  function handleJoin(roomId: string, displayName: string) {
+  function handleJoin(roomId: string, displayName: string, stream: MediaStream | null) {
+    initialStreamRef.current = stream
     setAppState({ screen: 'room', roomId, displayName })
   }
 
   function handleLeave() {
+    initialStreamRef.current = null
     setAppState({ screen: 'join' })
   }
 
@@ -41,6 +45,7 @@ export default function App() {
       <ConferenceRoom
         roomId={appState.roomId}
         displayName={appState.displayName}
+        initialStream={initialStreamRef.current}
         onLeave={handleLeave}
       />
     )

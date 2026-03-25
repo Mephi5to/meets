@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 
 interface JoinRoomProps {
-  onJoin: (roomId: string, displayName: string) => void
+  onJoin: (roomId: string, displayName: string, stream: MediaStream | null) => void
   initialRoomId?: string
 }
 
@@ -53,12 +53,33 @@ export function JoinRoom({ onJoin, initialRoomId = '' }: JoinRoomProps) {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  function handleJoin(e: React.FormEvent) {
+  async function handleJoin(e: React.FormEvent) {
     e.preventDefault()
     const trimmedName = displayName.trim()
     const trimmedRoom = roomId.trim().toUpperCase()
     if (!trimmedRoom || !trimmedName) return
-    onJoin(trimmedRoom, trimmedName)
+
+    // Acquire media NOW, inside the user gesture, so Firefox grants permission.
+    // If it fails for any reason, pass null — the user joins as receive-only.
+    let stream: MediaStream | null = null
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: { width: { ideal: 1280, max: 1920 }, height: { ideal: 720, max: 1080 }, frameRate: { ideal: 30, max: 30 }, facingMode: 'user' },
+      })
+    } catch {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      } catch {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true })
+        } catch {
+          stream = null
+        }
+      }
+    }
+
+    onJoin(trimmedRoom, trimmedName, stream)
   }
 
   return (

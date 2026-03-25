@@ -11,6 +11,7 @@ export interface WebRTCControls {
   toggleVideo: () => void
   toggleScreenShare: () => Promise<void>
   startLocalMedia: () => Promise<MediaStream>
+  adoptStream: (stream: MediaStream) => void
   stopLocalMedia: () => void
   removeAllPeers: () => void
   createOffer: (
@@ -91,7 +92,7 @@ export function useWebRTC(): WebRTCControls {
       // NotFoundError     — no device present
       // OverconstrainedError — constraints can't be satisfied
       // AbortError        — device aborted unexpectedly
-      const retryable = ['NotFoundError', 'NotReadableError', 'OverconstrainedError', 'AbortError']
+      const retryable = ['NotFoundError', 'NotReadableError', 'OverconstrainedError', 'AbortError', 'NotAllowedError']
       if (retryable.includes(name)) {
         try {
           // Try audio-only (no camera)
@@ -113,6 +114,13 @@ export function useWebRTC(): WebRTCControls {
     localStreamRef.current = stream
     setLocalStream(stream)
     return stream
+  }, [])
+
+  const adoptStream = useCallback((stream: MediaStream) => {
+    localStreamRef.current = stream
+    setLocalStream(stream)
+    setAudioEnabled(stream.getAudioTracks().some((t) => t.enabled))
+    setVideoEnabled(stream.getVideoTracks().some((t) => t.enabled))
   }, [])
 
   const stopLocalMedia = useCallback(() => {
@@ -379,7 +387,7 @@ export function useWebRTC(): WebRTCControls {
   return {
     localStream, remotePeers, audioEnabled, videoEnabled, screenSharing,
     toggleAudio, toggleVideo, toggleScreenShare,
-    startLocalMedia, stopLocalMedia, removeAllPeers,
+    startLocalMedia, adoptStream, stopLocalMedia, removeAllPeers,
     createOffer, handleOffer, handleAnswer, handleIceCandidate, removePeer,
   }
 }

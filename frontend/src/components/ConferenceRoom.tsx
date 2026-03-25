@@ -16,10 +16,11 @@ import { VideoGrid } from './VideoGrid'
 interface ConferenceRoomProps {
   roomId: string
   displayName: string
+  initialStream?: MediaStream | null
   onLeave: () => void
 }
 
-export function ConferenceRoom({ roomId, displayName, onLeave }: ConferenceRoomProps) {
+export function ConferenceRoom({ roomId, displayName, initialStream, onLeave }: ConferenceRoomProps) {
   const [joinError, setJoinError] = useState<string | null>(null)
   const [joining, setJoining] = useState(true)
 
@@ -185,8 +186,14 @@ export function ConferenceRoom({ roomId, displayName, onLeave }: ConferenceRoomP
         //    before any remote tracks arrive.
         resumeAudioContext()
 
-        // 1. Start local media first so the user sees their camera immediately
-        await webrtc.startLocalMedia()
+        // 1. Use the stream acquired during the user gesture (click handler in
+        //    JoinRoom) so Firefox doesn't reject getUserMedia as "not allowed".
+        //    Fall back to startLocalMedia only if no stream was provided.
+        if (initialStream) {
+          webrtc.adoptStream(initialStream)
+        } else {
+          await webrtc.startLocalMedia()
+        }
         if (cancelled) return
 
         // 2. Connect signaling
