@@ -39,13 +39,13 @@ public class TurnCredentialService : ITurnCredentialService
         var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(username));
         var credential = Convert.ToBase64String(hash);
 
-        // UDP first (lowest latency), TCP as fallback for restrictive firewalls.
-        // TURNS (TLS) is omitted — it requires a valid cert on the TURN server
-        // which we don't have for an IP-only deployment.
+        // Priority order: TLS first (works through mobile networks, port 5349),
+        // then plain UDP (lowest latency), then plain TCP fallback.
         var urls = new[]
         {
-            $"turn:{turnHost}:{udpPort}",                   // TURN over UDP — best performance
-            $"turn:{turnHost}:{udpPort}?transport=tcp",     // TURN over TCP — NAT/firewall fallback
+            $"turns:{turnHost}:{tlsPort}?transport=tcp",    // TURNS/TLS — mobile-friendly, rarely blocked
+            $"turn:{turnHost}:{udpPort}",                   // TURN UDP — lowest latency
+            $"turn:{turnHost}:{udpPort}?transport=tcp",     // TURN TCP — firewall fallback
         };
 
         return new TurnCredentials(username, credential, urls);
