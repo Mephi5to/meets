@@ -12,6 +12,7 @@ export interface WebRTCControls {
   toggleScreenShare: () => Promise<void>
   startLocalMedia: () => Promise<MediaStream>
   stopLocalMedia: () => void
+  removeAllPeers: () => void
   createOffer: (
     peerId: string,
     peerName: string,
@@ -346,6 +347,14 @@ export function useWebRTC(): WebRTCControls {
     []
   )
 
+  const removeAllPeers = useCallback(() => {
+    peerConnectionsRef.current.forEach((pc) => pc.close())
+    peerConnectionsRef.current.clear()
+    iceCandidateQueues.current.clear()
+    remoteDescReady.current.clear()
+    setRemotePeers(new Map())
+  }, [])
+
   const removePeer = useCallback((peerId: string) => {
     const pc = peerConnectionsRef.current.get(peerId)
     if (pc) { pc.close(); peerConnectionsRef.current.delete(peerId) }
@@ -370,7 +379,7 @@ export function useWebRTC(): WebRTCControls {
   return {
     localStream, remotePeers, audioEnabled, videoEnabled, screenSharing,
     toggleAudio, toggleVideo, toggleScreenShare,
-    startLocalMedia, stopLocalMedia,
+    startLocalMedia, stopLocalMedia, removeAllPeers,
     createOffer, handleOffer, handleAnswer, handleIceCandidate, removePeer,
   }
 }

@@ -56,6 +56,38 @@ export function ConferenceRoom({ roomId, displayName, onLeave }: ConferenceRoomP
   // Store participant names so onReceiveOffer can use the correct display name
   const pendingNamesRef = useRef<Map<string, string>>(new Map())
 
+  // When SignalR auto-reconnects (e.g. mobile network switch), the backend
+  // has already removed us from the room (OnDisconnectedAsync fired). We must
+  // rejoin the room and re-create offers to all currently present participants.
+  const onReconnected = useCallback(async () => {
+    if (!signalingRef.current) return
+    webrtc.removeAllPeers()
+    pendingNamesRef.current.clear()
+    try {
+      const creds = await signalingRef.current.getTurnCredentials()
+      turnCredsRef.current = creds
+      const event = await signalingRef.current.joinRoom(roomId, displayName)
+      for (const participant of event.existingParticipants) {
+        const sdp = await webrtc.createOffer(
+          participant.connectionId,
+          participant.displayName,
+          creds,
+          (candidate) => {
+            signalingRef.current?.sendIceCandidate(
+              participant.connectionId,
+              candidate.candidate,
+              candidate.sdpMid ?? null,
+              candidate.sdpMLineIndex ?? null
+            )
+          }
+        )
+        await signalingRef.current.sendOffer(participant.connectionId, sdp)
+      }
+    } catch (err) {
+      console.error('[ConferenceRoom] Rejoin after reconnect failed:', err)
+    }
+  }, [webrtc.removeAllPeers, webrtc.createOffer, roomId, displayName])
+
   // When a new participant joins, the SERVER already notified the joiner to
   // send us an offer (via their existingParticipants list). We must NOT
   // create an offer here — that causes "glare": both sides become offerers,
@@ -134,6 +166,7 @@ export function ConferenceRoom({ roomId, displayName, onLeave }: ConferenceRoomP
     onReceiveOffer,
     onReceiveAnswer,
     onReceiveIceCandidate,
+    onReconnected,
   })
 
   // Keep the ref in sync with the current signaling object every render

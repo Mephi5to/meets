@@ -27,6 +27,7 @@ export interface SignalingCallbacks {
     sdpMid: string | null,
     sdpMLineIndex: number | null
   ) => void
+  onReconnected?: () => void
 }
 
 export function useSignaling(callbacks: SignalingCallbacks) {
@@ -92,7 +93,10 @@ export function useSignaling(callbacks: SignalingCallbacks) {
     )
 
     connection.onreconnecting(() => setState('connecting'))
-    connection.onreconnected(() => setState('connected'))
+    connection.onreconnected(() => {
+      setState('connected')
+      callbacksRef.current.onReconnected?.()
+    })
     connection.onclose(() => setState('disconnected'))
 
     try {

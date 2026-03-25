@@ -97,7 +97,7 @@ public class SignalingHub : Hub
     /// </summary>
     public async Task SendOffer(string targetConnectionId, string sdp)
     {
-        _logger.LogDebug("Offer from {From} to {To}", Context.ConnectionId, targetConnectionId);
+        _logger.LogInformation("Offer {From} → {To}", Context.ConnectionId, targetConnectionId);
         await Clients.Client(targetConnectionId).SendAsync("ReceiveOffer", Context.ConnectionId, sdp);
     }
 
@@ -106,7 +106,7 @@ public class SignalingHub : Hub
     /// </summary>
     public async Task SendAnswer(string targetConnectionId, string sdp)
     {
-        _logger.LogDebug("Answer from {From} to {To}", Context.ConnectionId, targetConnectionId);
+        _logger.LogInformation("Answer {From} → {To}", Context.ConnectionId, targetConnectionId);
         await Clients.Client(targetConnectionId).SendAsync("ReceiveAnswer", Context.ConnectionId, sdp);
     }
 
@@ -117,6 +117,7 @@ public class SignalingHub : Hub
     /// </summary>
     public async Task SendIceCandidate(string targetConnectionId, string candidate, string? sdpMid, int? sdpMLineIndex)
     {
+        _logger.LogDebug("ICE {From} → {To}", Context.ConnectionId, targetConnectionId);
         await Clients.Client(targetConnectionId).SendAsync(
             "ReceiveIceCandidate",
             Context.ConnectionId,
