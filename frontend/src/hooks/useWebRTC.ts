@@ -86,7 +86,12 @@ export function useWebRTC(): WebRTCControls {
       })
     } catch (err: unknown) {
       const name = (err as DOMException).name
-      if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+      // NotReadableError  — device in use by another app (Zoom, Teams, etc.)
+      // NotFoundError     — no device present
+      // OverconstrainedError — constraints can't be satisfied
+      // AbortError        — device aborted unexpectedly
+      const retryable = ['NotFoundError', 'NotReadableError', 'OverconstrainedError', 'AbortError']
+      if (retryable.includes(name)) {
         try {
           // Try audio-only (no camera)
           stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false })
