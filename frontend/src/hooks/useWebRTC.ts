@@ -64,19 +64,41 @@ export function useWebRTC(): WebRTCControls {
   // ─── Local media ──────────────────────────────────────────────────────────
 
   const startLocalMedia = useCallback(async (): Promise<MediaStream> => {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-      video: {
-        width: { ideal: 1280, max: 1920 },
-        height: { ideal: 720, max: 1080 },
-        frameRate: { ideal: 30, max: 30 },
-        facingMode: 'user',
-      },
-    })
+    const audioConstraints = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    }
+    const videoConstraints = {
+      width: { ideal: 1280, max: 1920 },
+      height: { ideal: 720, max: 1080 },
+      frameRate: { ideal: 30, max: 30 },
+      facingMode: 'user',
+    }
+
+    let stream: MediaStream
+
+    try {
+      // Ideal: both camera and microphone
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraints,
+        video: videoConstraints,
+      })
+    } catch (err: unknown) {
+      const name = (err as DOMException).name
+      if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+        // Try audio-only (no camera)
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false })
+        } catch {
+          // Try video-only (no microphone)
+          stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: videoConstraints })
+        }
+      } else {
+        throw err
+      }
+    }
+
     localStreamRef.current = stream
     setLocalStream(stream)
     return stream
