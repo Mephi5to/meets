@@ -87,12 +87,17 @@ export function useWebRTC(): WebRTCControls {
     } catch (err: unknown) {
       const name = (err as DOMException).name
       if (name === 'NotFoundError' || name === 'OverconstrainedError') {
-        // Try audio-only (no camera)
         try {
+          // Try audio-only (no camera)
           stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false })
         } catch {
-          // Try video-only (no microphone)
-          stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: videoConstraints })
+          try {
+            // Try video-only (no microphone)
+            stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: videoConstraints })
+          } catch {
+            // No devices at all — join as receive-only (can still see/hear others)
+            stream = new MediaStream()
+          }
         }
       } else {
         throw err
