@@ -256,7 +256,7 @@ export function ConferenceRoom({ roomId, displayName, onLeave }: ConferenceRoomP
   return (
     // resumeAudioContext on any click is a belt-and-suspenders fallback in
     // case the context was created in suspended state on the first render.
-    <div className="min-h-screen bg-surface-900 flex flex-col" onClick={resumeAudioContext}>
+    <div className="h-screen bg-surface-900 flex flex-col overflow-hidden" onClick={resumeAudioContext}>
       {/* Header */}
       <div className="h-12 flex items-center justify-between px-4 border-b border-white/10">
         <div className="flex items-center gap-2">
@@ -276,7 +276,7 @@ export function ConferenceRoom({ roomId, displayName, onLeave }: ConferenceRoomP
       </div>
 
       {/* Video grid */}
-      <div className="flex-1 overflow-hidden pb-16">
+      <div className="flex-1 min-h-0 overflow-hidden pb-16">
         <VideoGrid
           localStream={webrtc.localStream}
           localDisplayName={displayName}

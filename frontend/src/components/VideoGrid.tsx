@@ -30,7 +30,7 @@ export function VideoGrid({
         audioEnabled={localAudioEnabled}
         videoEnabled={localVideoEnabled}
         isLocal={true}
-        className="min-h-0"
+        className="min-h-0 min-w-0"
       />
 
       {/* Remote tiles */}
@@ -43,7 +43,7 @@ export function VideoGrid({
           audioEnabled={peer.audioEnabled}
           videoEnabled={peer.videoEnabled}
           isLocal={false}
-          className="min-h-0"
+          className="min-h-0 min-w-0"
         />
       ))}
     </div>
