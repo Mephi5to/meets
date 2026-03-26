@@ -13,21 +13,41 @@
  *
  * Remote audio is then routed through MediaStreamAudioSourceNode → destination,
  * bypassing <audio> autoplay restrictions entirely.
+ *
+ * NOTE: On WebKit (Safari / iOS), remote WebRTC audio is played via <audio>
+ * elements instead of Web Audio API, because WebKit's MediaStreamAudioSourceNode
+ * has a known bug that silences remote WebRTC streams.  See VideoTile.tsx.
  */
+
+// Safari 14.0 and older expose `webkitAudioContext` instead of `AudioContext`.
+// All iOS browsers (Chrome-iOS, Firefox-iOS) also use WebKit and may need this.
+const AudioCtx =
+  typeof AudioContext !== 'undefined'
+    ? AudioContext
+    : typeof (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext !== 'undefined'
+      ? (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext
+      : null
 
 let ctx: AudioContext | null = null
 
 export function getAudioContext(): AudioContext {
   if (!ctx || ctx.state === 'closed') {
-    ctx = new AudioContext()
+    if (!AudioCtx) throw new Error('AudioContext is not supported in this browser')
+    ctx = new AudioCtx()
   }
   return ctx
 }
 
 /** Call this during or immediately after a user gesture to unlock the context. */
 export function resumeAudioContext(): void {
-  const c = getAudioContext()
-  if (c.state === 'suspended') {
-    c.resume().catch(() => {})
+  try {
+    const c = getAudioContext()
+    if (c.state === 'suspended') {
+      c.resume().catch(() => {})
+    }
+  } catch {
+    // AudioContext not supported — audio will be handled via <audio> element fallback
   }
 }

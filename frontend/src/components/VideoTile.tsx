@@ -1,6 +1,7 @@
 import { MicOff, VideoOff } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { getAudioContext } from '../utils/audioContext'
+import { IS_WEBKIT } from '../utils/browser'
 
 interface VideoTileProps {
   stream: MediaStream | null
@@ -22,6 +23,7 @@ export function VideoTile({
   className = '',
 }: VideoTileProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const audioRef = useRef<HTMLAudioElement>(null)
   // Tracks the Web Audio source node so we can disconnect it on cleanup.
   const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null)
 
@@ -31,20 +33,59 @@ export function VideoTile({
     if (!video) return
     if (stream) {
       video.srcObject = stream
-      video.play().catch((err) => {
-        if (err.name !== 'AbortError') console.warn('[VideoTile] video play():', err.name)
-      })
+      // Some older browsers return undefined from play(); guard the .catch()
+      const playPromise = video.play()
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch((err: DOMException) => {
+          if (err.name !== 'AbortError') console.warn('[VideoTile] video play():', err.name)
+        })
+      }
     } else {
       video.srcObject = null
     }
   }, [stream])
 
-  // ── Audio via Web Audio API ────────────────────────────────────────────────
-  // We route remote audio through AudioContext instead of an <audio> element.
-  // This bypasses Chrome's autoplay restrictions entirely: once the context is
-  // resumed (done in ConferenceRoom right after the Join click), any source
-  // connected to it plays immediately without needing a separate user gesture.
+  // ── Audio: WebKit path (Safari / iOS) ────────────────────────────────────
+  //
+  // WebKit has a known bug: MediaStreamAudioSourceNode silences remote WebRTC
+  // streams. We work around this by using a plain <audio> element on WebKit.
+  // Safari/iOS allow autoplay for WebRTC media after user interaction, so this
+  // works reliably after the "Join" click.
   useEffect(() => {
+    if (!IS_WEBKIT) return // Non-WebKit uses Web Audio API below
+    const audio = audioRef.current
+    if (!audio) return
+
+    if (muted || !stream) {
+      audio.srcObject = null
+      return
+    }
+
+    const audioTracks = stream.getAudioTracks()
+    if (audioTracks.length === 0) {
+      audio.srcObject = null
+      return
+    }
+
+    audio.srcObject = new MediaStream(audioTracks)
+    const playPromise = audio.play()
+    if (playPromise && typeof playPromise.catch === 'function') {
+      playPromise.catch(() => {})
+    }
+
+    return () => {
+      audio.srcObject = null
+    }
+  }, [stream, muted])
+
+  // ── Audio: Non-WebKit path (Chrome, Firefox, Edge, Opera, Yandex) ────────
+  //
+  // Route remote audio through AudioContext → destination. This bypasses
+  // Chrome's autoplay restrictions: once the context is resumed (on Join click),
+  // any source connected to it plays immediately without a separate gesture.
+  useEffect(() => {
+    if (IS_WEBKIT) return // WebKit uses <audio> element above
+
     // Disconnect any previous source
     if (sourceNodeRef.current) {
       sourceNodeRef.current.disconnect()
@@ -56,14 +97,20 @@ export function VideoTile({
     const audioTracks = stream.getAudioTracks()
     if (audioTracks.length === 0) return
 
-    const ctx = getAudioContext()
-    const source = ctx.createMediaStreamSource(new MediaStream(audioTracks))
-    source.connect(ctx.destination)
-    sourceNodeRef.current = source
+    try {
+      const ctx = getAudioContext()
+      const source = ctx.createMediaStreamSource(new MediaStream(audioTracks))
+      source.connect(ctx.destination)
+      sourceNodeRef.current = source
+    } catch (err) {
+      console.warn('[VideoTile] Web Audio API error, audio may not play:', err)
+    }
 
     return () => {
-      source.disconnect()
-      sourceNodeRef.current = null
+      if (sourceNodeRef.current) {
+        sourceNodeRef.current.disconnect()
+        sourceNodeRef.current = null
+      }
     }
   }, [stream, muted])
 
@@ -85,6 +132,9 @@ export function VideoTile({
         muted
         className={`w-full h-full object-contain [transform:scaleX(-1)] ${!videoEnabled ? 'hidden' : ''}`}
       />
+
+      {/* Hidden <audio> element used only on WebKit (Safari/iOS) for remote audio */}
+      {IS_WEBKIT && <audio ref={audioRef} autoPlay playsInline />}
 
       {!videoEnabled && (
         <div className="flex flex-col items-center gap-2">

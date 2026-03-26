@@ -10,6 +10,7 @@ import {
   VideoOff,
 } from 'lucide-react'
 import { useState } from 'react'
+import { copyToClipboard } from '../utils/clipboard'
 
 interface ControlsProps {
   audioEnabled: boolean
@@ -37,11 +38,15 @@ export function Controls({
   const [copied, setCopied] = useState(false)
 
   async function handleCopyLink() {
-    const url = new URL(window.location.href)
-    url.searchParams.set('room', roomId)
-    await navigator.clipboard.writeText(url.toString())
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    try {
+      const url = new URL(window.location.href)
+      url.searchParams.set('room', roomId)
+      await copyToClipboard(url.toString())
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Clipboard access denied — silent fail, no crash
+    }
   }
 
   return (

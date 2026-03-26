@@ -1,6 +1,7 @@
 import { Copy, Video } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api } from '../services/api'
+import { copyToClipboard } from '../utils/clipboard'
 
 interface JoinRoomProps {
   onJoin: (roomId: string, displayName: string, stream: MediaStream | null) => void
@@ -46,11 +47,15 @@ export function JoinRoom({ onJoin, initialRoomId = '' }: JoinRoomProps) {
   }
 
   async function handleCopy() {
-    const url = new URL(window.location.href)
-    url.searchParams.set('room', roomId.toUpperCase())
-    await navigator.clipboard.writeText(url.toString())
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    try {
+      const url = new URL(window.location.href)
+      url.searchParams.set('room', roomId.toUpperCase())
+      await copyToClipboard(url.toString())
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Clipboard access denied — silent fail
+    }
   }
 
   async function handleJoin(e: React.FormEvent) {

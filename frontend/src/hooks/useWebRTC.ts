@@ -66,12 +66,12 @@ export function useWebRTC(): WebRTCControls {
   // ─── Local media ──────────────────────────────────────────────────────────
 
   const startLocalMedia = useCallback(async (): Promise<MediaStream> => {
-    const audioConstraints = {
+    const audioConstraints: MediaTrackConstraints = {
       echoCancellation: true,
       noiseSuppression: true,
       autoGainControl: true,
     }
-    const videoConstraints = {
+    const videoConstraints: MediaTrackConstraints = {
       width: { ideal: 1280, max: 1920 },
       height: { ideal: 720, max: 1080 },
       frameRate: { ideal: 30, max: 30 },
@@ -88,14 +88,15 @@ export function useWebRTC(): WebRTCControls {
       })
     } catch (err: unknown) {
       const name = (err as DOMException).name
-      // NotReadableError  — device in use by another app (Zoom, Teams, etc.)
+      // NotReadableError  — device in use by another app (Discord, Zoom, etc.)
       // NotFoundError     — no device present
       // OverconstrainedError — constraints can't be satisfied
       // AbortError        — device aborted unexpectedly
+      // NotAllowedError   — user denied permission (retry with fewer devices)
       const retryable = ['NotFoundError', 'NotReadableError', 'OverconstrainedError', 'AbortError', 'NotAllowedError']
       if (retryable.includes(name)) {
         try {
-          // Try audio-only (no camera)
+          // Try audio-only (no camera) — most apps share the mic on all platforms
           stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false })
         } catch {
           try {
@@ -111,12 +112,38 @@ export function useWebRTC(): WebRTCControls {
       }
     }
 
+    // Listen for track.ended — fires when another app (Discord, Teams) steals
+    // exclusive access to the device, or the device is physically unplugged.
+    // Update React state so the UI reflects the loss (e.g. camera icon → off).
+    stream.getTracks().forEach((track) => {
+      track.addEventListener('ended', () => {
+        const currentStream = localStreamRef.current
+        if (!currentStream) return
+        const hasAudio = currentStream.getAudioTracks().some((t) => t.readyState === 'live')
+        const hasVideo = currentStream.getVideoTracks().some((t) => t.readyState === 'live')
+        setAudioEnabled(hasAudio)
+        setVideoEnabled(hasVideo)
+      })
+    })
+
     localStreamRef.current = stream
     setLocalStream(stream)
     return stream
   }, [])
 
   const adoptStream = useCallback((stream: MediaStream) => {
+    // Listen for track.ended (device stolen by Discord/Teams, or unplugged)
+    stream.getTracks().forEach((track) => {
+      track.addEventListener('ended', () => {
+        const currentStream = localStreamRef.current
+        if (!currentStream) return
+        const hasAudio = currentStream.getAudioTracks().some((t) => t.readyState === 'live')
+        const hasVideo = currentStream.getVideoTracks().some((t) => t.readyState === 'live')
+        setAudioEnabled(hasAudio)
+        setVideoEnabled(hasVideo)
+      })
+    })
+
     localStreamRef.current = stream
     setLocalStream(stream)
     setAudioEnabled(stream.getAudioTracks().some((t) => t.enabled))
@@ -161,10 +188,16 @@ export function useWebRTC(): WebRTCControls {
       }
       setScreenSharing(false)
     } else {
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: { ideal: 15, max: 30 } },
-        audio: false,
-      })
+      let screenStream: MediaStream
+      try {
+        screenStream = await navigator.mediaDevices.getDisplayMedia({
+          video: { frameRate: { ideal: 15, max: 30 } },
+          audio: false,
+        })
+      } catch {
+        // User cancelled the picker or browser denied — just return
+        return
+      }
       screenStreamRef.current = screenStream
       const screenTrack = screenStream.getVideoTracks()[0]
       pcs.forEach((pc) => {
