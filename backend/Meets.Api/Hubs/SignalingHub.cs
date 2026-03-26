@@ -71,9 +71,6 @@ public class SignalingHub : Hub
         });
         await Clients.OthersInGroup(roomId).SendAsync("ParticipantJoined", joinedEvent);
 
-        // Return room state + TURN credentials to the joining client
-        var turnCreds = _turnCredentialService.GenerateCredentials(connectionId);
-
         return new RoomJoinedEvent(
             RoomId: roomId,
             YourConnectionId: connectionId,

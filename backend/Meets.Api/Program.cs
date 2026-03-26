@@ -70,3 +70,5 @@ app.MapHub<SignalingHub>("/hub/signaling", options =>
 });
 
 app.Run();
+
+public partial class Program;
