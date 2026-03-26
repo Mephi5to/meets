@@ -24,6 +24,28 @@ export function ConferenceRoom({ roomId, displayName, initialStream, onLeave }: 
   const [joinError, setJoinError] = useState<string | null>(null)
   const [joining, setJoining] = useState(true)
 
+  // ─── Meeting timer ────────────────────────────────────────────────────────
+  const [elapsed, setElapsed] = useState(0)
+  const joinedAtRef = useRef<number>(0)
+
+  useEffect(() => {
+    if (joining) return
+    joinedAtRef.current = Date.now()
+    const id = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - joinedAtRef.current) / 1000))
+    }, 1000)
+    return () => clearInterval(id)
+  }, [joining])
+
+  function formatDuration(totalSeconds: number): string {
+    const h = Math.floor(totalSeconds / 3600)
+    const m = Math.floor((totalSeconds % 3600) / 60)
+    const s = totalSeconds % 60
+    const mm = String(m).padStart(2, '0')
+    const ss = String(s).padStart(2, '0')
+    return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
+  }
+
   // Cached TURN credentials — reuse until they expire (~24h)
   const turnCredsRef = useRef<TurnCredentials | null>(null)
 
@@ -145,6 +167,13 @@ export function ConferenceRoom({ roomId, displayName, initialStream, onLeave }: 
     [webrtc.handleAnswer]
   )
 
+  const onReceiveMediaState = useCallback(
+    (fromConnectionId: string, audioEnabled: boolean, videoEnabled: boolean) => {
+      webrtc.updatePeerMediaState(fromConnectionId, audioEnabled, videoEnabled)
+    },
+    [webrtc.updatePeerMediaState]
+  )
+
   const onReceiveIceCandidate = useCallback(
     async (
       fromConnectionId: string,
@@ -167,6 +196,7 @@ export function ConferenceRoom({ roomId, displayName, initialStream, onLeave }: 
     onReceiveOffer,
     onReceiveAnswer,
     onReceiveIceCandidate,
+    onReceiveMediaState,
     onReconnected,
   })
 
@@ -246,6 +276,27 @@ export function ConferenceRoom({ roomId, displayName, initialStream, onLeave }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // ─── Media state broadcasting ──────────────────────────────────────────
+  // Wrap toggleAudio/toggleVideo to also broadcast state to peers via SignalR
+
+  const handleToggleAudio = useCallback(() => {
+    webrtc.toggleAudio()
+    // After toggle, the new state is the opposite of current
+    signaling.sendMediaState(!webrtc.audioEnabled, webrtc.videoEnabled)
+  }, [webrtc.toggleAudio, webrtc.audioEnabled, webrtc.videoEnabled, signaling.sendMediaState])
+
+  const handleToggleVideo = useCallback(() => {
+    webrtc.toggleVideo()
+    signaling.sendMediaState(webrtc.audioEnabled, !webrtc.videoEnabled)
+  }, [webrtc.toggleVideo, webrtc.audioEnabled, webrtc.videoEnabled, signaling.sendMediaState])
+
+  // Send initial media state after joining so existing participants see our state
+  useEffect(() => {
+    if (joining) return
+    signaling.sendMediaState(webrtc.audioEnabled, webrtc.videoEnabled)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [joining])
+
   // ─── Leave ─────────────────────────────────────────────────────────────
 
   const handleLeave = useCallback(async () => {
@@ -299,10 +350,15 @@ export function ConferenceRoom({ roomId, displayName, initialStream, onLeave }: 
     <div className="h-screen bg-surface-900 flex flex-col overflow-hidden" onClick={resumeAudioContext}>
       {/* Header */}
       <div className="h-12 flex items-center justify-between px-4 border-b border-white/10">
-        <div className="flex items-center gap-2">
-          <span className="text-white/60 text-sm">Room</span>
-          <span className="font-mono text-white font-semibold tracking-widest text-sm">
-            {roomId}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-white/60 text-sm">Room</span>
+            <span className="font-mono text-white font-semibold tracking-widest text-sm">
+              {roomId}
+            </span>
+          </div>
+          <span className="text-white/40 text-sm font-mono tabular-nums">
+            {formatDuration(elapsed)}
           </span>
         </div>
         <div className="flex items-center gap-2 text-xs text-white/40">
@@ -332,8 +388,8 @@ export function ConferenceRoom({ roomId, displayName, initialStream, onLeave }: 
         videoEnabled={webrtc.videoEnabled}
         screenSharing={webrtc.screenSharing}
         roomId={roomId}
-        onToggleAudio={webrtc.toggleAudio}
-        onToggleVideo={webrtc.toggleVideo}
+        onToggleAudio={handleToggleAudio}
+        onToggleVideo={handleToggleVideo}
         onToggleScreenShare={webrtc.toggleScreenShare}
         onLeave={handleLeave}
         screenShareSupported={screenShareSupported}

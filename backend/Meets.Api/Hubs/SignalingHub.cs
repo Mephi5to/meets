@@ -126,6 +126,25 @@ public class SignalingHub : Hub
             sdpMLineIndex);
     }
 
+    // ─── Media state ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Broadcast audio/video enabled state to all other participants in the room.
+    /// Called when a user toggles their microphone or camera.
+    /// </summary>
+    public async Task SendMediaState(bool audioEnabled, bool videoEnabled)
+    {
+        var connectionId = Context.ConnectionId;
+        var roomId = _roomService.GetRoomIdByConnectionId(connectionId);
+        if (roomId == null) return;
+
+        await Clients.OthersInGroup(roomId).SendAsync(
+            "ReceiveMediaState",
+            connectionId,
+            audioEnabled,
+            videoEnabled);
+    }
+
     // ─── Disconnect handling ─────────────────────────────────────────────────
 
     public override async Task OnDisconnectedAsync(Exception? exception)

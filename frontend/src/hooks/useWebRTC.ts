@@ -30,6 +30,7 @@ export interface WebRTCControls {
   handleAnswer: (peerId: string, answerSdp: string) => Promise<void>
   handleIceCandidate: (peerId: string, candidate: RTCIceCandidateInit) => Promise<void>
   removePeer: (peerId: string) => void
+  updatePeerMediaState: (peerId: string, audioEnabled: boolean, videoEnabled: boolean) => void
 }
 
 const FORCE_RELAY = import.meta.env.VITE_FORCE_RELAY === 'true'
@@ -388,6 +389,20 @@ export function useWebRTC(): WebRTCControls {
     []
   )
 
+  const updatePeerMediaState = useCallback(
+    (peerId: string, audioEnabled: boolean, videoEnabled: boolean) => {
+      setRemotePeers((prev) => {
+        const existing = prev.get(peerId)
+        if (!existing) return prev
+        if (existing.audioEnabled === audioEnabled && existing.videoEnabled === videoEnabled) return prev
+        const next = new Map(prev)
+        next.set(peerId, { ...existing, audioEnabled, videoEnabled })
+        return next
+      })
+    },
+    []
+  )
+
   const removeAllPeers = useCallback(() => {
     peerConnectionsRef.current.forEach((pc) => pc.close())
     peerConnectionsRef.current.clear()
@@ -422,6 +437,7 @@ export function useWebRTC(): WebRTCControls {
     toggleAudio, toggleVideo, toggleScreenShare,
     startLocalMedia, adoptStream, stopLocalMedia, removeAllPeers,
     createOffer, handleOffer, handleAnswer, handleIceCandidate, removePeer,
+    updatePeerMediaState,
   }
 }
 

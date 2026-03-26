@@ -7,6 +7,7 @@ public interface IRoomService
 {
     Room GetOrCreate(string roomId);
     Room? Get(string roomId);
+    string? GetRoomIdByConnectionId(string connectionId);
     Participant AddParticipant(string roomId, string connectionId, string displayName);
     Participant? RemoveParticipant(string connectionId);
     IReadOnlyList<Room> GetAllRooms();
@@ -44,6 +45,15 @@ public class RoomService : IRoomService
         {
             _rooms.TryGetValue(roomId, out var room);
             return room;
+        }
+    }
+
+    public string? GetRoomIdByConnectionId(string connectionId)
+    {
+        lock (_lock)
+        {
+            _connectionToRoom.TryGetValue(connectionId, out var roomId);
+            return roomId;
         }
     }
 

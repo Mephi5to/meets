@@ -27,6 +27,7 @@ export interface SignalingCallbacks {
     sdpMid: string | null,
     sdpMLineIndex: number | null
   ) => void
+  onReceiveMediaState?: (fromConnectionId: string, audioEnabled: boolean, videoEnabled: boolean) => void
   onReconnected?: () => void
 }
 
@@ -89,6 +90,13 @@ export function useSignaling(callbacks: SignalingCallbacks) {
           sdpMid,
           sdpMLineIndex
         )
+      }
+    )
+
+    connection.on(
+      'ReceiveMediaState',
+      (fromConnectionId: string, audioEnabled: boolean, videoEnabled: boolean) => {
+        callbacksRef.current.onReceiveMediaState?.(fromConnectionId, audioEnabled, videoEnabled)
       }
     )
 
@@ -166,6 +174,13 @@ export function useSignaling(callbacks: SignalingCallbacks) {
     []
   )
 
+  const sendMediaState = useCallback(
+    async (audioEnabled: boolean, videoEnabled: boolean) => {
+      await connectionRef.current?.invoke('SendMediaState', audioEnabled, videoEnabled)
+    },
+    []
+  )
+
   useEffect(() => {
     return () => {
       connectionRef.current?.stop()
@@ -181,6 +196,7 @@ export function useSignaling(callbacks: SignalingCallbacks) {
     sendOffer,
     sendAnswer,
     sendIceCandidate,
+    sendMediaState,
   }
 }
 
