@@ -7,7 +7,7 @@ ENV VITE_SIGNALING_URL=$VITE_SIGNALING_URL
 ENV VITE_FORCE_RELAY=$VITE_FORCE_RELAY
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm install
 
 COPY . .
 RUN npm run build
