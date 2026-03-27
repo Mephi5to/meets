@@ -7,7 +7,34 @@
     <meta name="description" content="Secure video conferencing with TURN relay for reliable global connectivity" />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="app-loader" style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0d0f12;color:#fff;font-family:system-ui,sans-serif;flex-direction:column;gap:16px">
+        <div style="width:40px;height:40px;border:3px solid rgba(255,255,255,0.2);border-top-color:#3b82f6;border-radius:50%;animation:spin 0.8s linear infinite"></div>
+        <p style="opacity:0.6;font-size:14px">Loading…</p>
+      </div>
+    </div>
+    <noscript>
+      <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0d0f12;color:#fff;font-family:system-ui,sans-serif;flex-direction:column;gap:12px;padding:20px;text-align:center">
+        <h2 style="font-size:20px;margin:0">JavaScript Required</h2>
+        <p style="opacity:0.6;font-size:14px;margin:0">Please enable JavaScript to use Meets.</p>
+      </div>
+    </noscript>
+    <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+    <script>
+      window.__meets_diag = { htmlLoaded: true, jsStarted: false, reactMounted: false, errors: [] };
+      window.addEventListener('error', function(e) {
+        window.__meets_diag.errors.push(e.message + ' at ' + (e.filename || '') + ':' + (e.lineno || ''));
+        var el = document.getElementById('app-loader');
+        if (el) {
+          el.innerHTML = '<div style="max-width:420px;padding:20px;text-align:center">' +
+            '<h2 style="font-size:20px;margin:0 0 8px">Failed to load</h2>' +
+            '<p style="opacity:0.6;font-size:13px;margin:0 0 12px">' + e.message + '</p>' +
+            '<p style="opacity:0.4;font-size:11px;word-break:break-all;margin:0">' + (e.filename || '') + ':' + (e.lineno || '') + '</p>' +
+            '<button onclick="location.reload()" style="margin-top:16px;padding:8px 20px;background:#3b82f6;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px">Retry</button>' +
+            '</div>';
+        }
+      });
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
