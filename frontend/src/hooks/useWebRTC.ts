@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RemotePeer, TurnCredentials } from '../types'
 
+export type IceStatus = 'gathering' | 'connected' | 'failed' | 'disconnected'
+
 export interface WebRTCControls {
   localStream: MediaStream | null
   remotePeers: Map<string, RemotePeer>
   audioEnabled: boolean
   videoEnabled: boolean
   screenSharing: boolean
+  iceStatus: IceStatus
   toggleAudio: () => void
   toggleVideo: () => void
   toggleScreenShare: () => Promise<void>
@@ -31,11 +34,12 @@ export interface WebRTCControls {
   handleIceCandidate: (peerId: string, candidate: RTCIceCandidateInit) => Promise<void>
   removePeer: (peerId: string) => void
   updatePeerMediaState: (peerId: string, audioEnabled: boolean, videoEnabled: boolean) => void
+  setRelayBypass: (enabled: boolean) => void
 }
 
 const FORCE_RELAY = import.meta.env.VITE_FORCE_RELAY === 'true'
 
-function buildIceConfig(creds: TurnCredentials): RTCConfiguration {
+function buildIceConfig(creds: TurnCredentials, forceAll = false): RTCConfiguration {
   return {
     iceServers: [
       {
@@ -44,7 +48,7 @@ function buildIceConfig(creds: TurnCredentials): RTCConfiguration {
         credential: creds.credential,
       },
     ],
-    iceTransportPolicy: FORCE_RELAY ? 'relay' : 'all',
+    iceTransportPolicy: forceAll ? 'all' : (FORCE_RELAY ? 'relay' : 'all'),
     bundlePolicy: 'max-bundle',
     rtcpMuxPolicy: 'require',
   }
@@ -56,10 +60,12 @@ export function useWebRTC(): WebRTCControls {
   const [audioEnabled, setAudioEnabled] = useState(true)
   const [videoEnabled, setVideoEnabled] = useState(true)
   const [screenSharing, setScreenSharing] = useState(false)
+  const [iceStatus, setIceStatus] = useState<IceStatus>('gathering')
 
   const localStreamRef = useRef<MediaStream | null>(null)
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
   const screenStreamRef = useRef<MediaStream | null>(null)
+  const forceAllRef = useRef(false)
 
   const iceCandidateQueues = useRef<Map<string, RTCIceCandidateInit[]>>(new Map())
   const remoteDescReady = useRef<Set<string>>(new Set())
@@ -236,6 +242,26 @@ export function useWebRTC(): WebRTCControls {
     }
   }
 
+  // ─── Aggregate ICE status across all peer connections ─────────────────────
+
+  function recomputeIceStatus() {
+    const pcs = peerConnectionsRef.current
+    if (pcs.size === 0) { setIceStatus('gathering'); return }
+
+    let anyConnected = false
+    let allFailed = true
+
+    for (const pc of pcs.values()) {
+      const s = pc.iceConnectionState
+      if (s === 'connected' || s === 'completed') { anyConnected = true; allFailed = false }
+      else if (s !== 'failed' && s !== 'closed') { allFailed = false }
+    }
+
+    if (anyConnected) setIceStatus('connected')
+    else if (allFailed) setIceStatus('failed')
+    else setIceStatus('gathering')
+  }
+
   // ─── Peer connection factory ───────────────────────────────────────────────
 
   function createPeerConnection(
@@ -244,7 +270,7 @@ export function useWebRTC(): WebRTCControls {
     creds: TurnCredentials,
     onIceCandidate: (candidate: RTCIceCandidate) => void
   ): RTCPeerConnection {
-    const pc = new RTCPeerConnection(buildIceConfig(creds))
+    const pc = new RTCPeerConnection(buildIceConfig(creds, forceAllRef.current))
     peerConnectionsRef.current.set(peerId, pc)
     iceCandidateQueues.current.set(peerId, [])
     remoteDescReady.current.delete(peerId)
@@ -307,6 +333,7 @@ export function useWebRTC(): WebRTCControls {
 
     pc.oniceconnectionstatechange = () => {
       console.info(`[WebRTC] peer=${peerId} ICE=${pc.iceConnectionState}`)
+      recomputeIceStatus()
     }
 
     return pc
@@ -409,6 +436,7 @@ export function useWebRTC(): WebRTCControls {
     iceCandidateQueues.current.clear()
     remoteDescReady.current.clear()
     setRemotePeers(new Map())
+    setIceStatus('gathering')
   }, [])
 
   const removePeer = useCallback((peerId: string) => {
@@ -421,6 +449,12 @@ export function useWebRTC(): WebRTCControls {
       next.delete(peerId)
       return next
     })
+    recomputeIceStatus()
+  }, [])
+
+  const setRelayBypass = useCallback((enabled: boolean) => {
+    forceAllRef.current = enabled
+    console.info(`[WebRTC] relay bypass ${enabled ? 'ENABLED' : 'DISABLED'} — iceTransportPolicy will be '${enabled ? 'all' : 'relay'}'`)
   }, [])
 
   useEffect(() => {
@@ -433,11 +467,11 @@ export function useWebRTC(): WebRTCControls {
   }, [])
 
   return {
-    localStream, remotePeers, audioEnabled, videoEnabled, screenSharing,
+    localStream, remotePeers, audioEnabled, videoEnabled, screenSharing, iceStatus,
     toggleAudio, toggleVideo, toggleScreenShare,
     startLocalMedia, adoptStream, stopLocalMedia, removeAllPeers,
     createOffer, handleOffer, handleAnswer, handleIceCandidate, removePeer,
-    updatePeerMediaState,
+    updatePeerMediaState, setRelayBypass,
   }
 }
 

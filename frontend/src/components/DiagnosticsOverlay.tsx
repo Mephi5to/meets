@@ -1,13 +1,15 @@
 import { Activity, ChevronDown, ChevronUp } from 'lucide-react'
 import { useState } from 'react'
+import type { IceStatus } from '../hooks/useWebRTC'
 import type { ConnectionStats } from '../types'
 
 interface DiagnosticsOverlayProps {
   stats: ConnectionStats | null
   signalingState: string
+  iceStatus?: IceStatus
 }
 
-export function DiagnosticsOverlay({ stats, signalingState }: DiagnosticsOverlayProps) {
+export function DiagnosticsOverlay({ stats, signalingState, iceStatus }: DiagnosticsOverlayProps) {
   const [expanded, setExpanded] = useState(false)
 
   const rttColor =
@@ -81,6 +83,15 @@ export function DiagnosticsOverlay({ stats, signalingState }: DiagnosticsOverlay
           <div className="px-3 pb-3 pt-1 border-t border-white/10 space-y-1.5 min-w-[220px]">
             <Row label="Signaling" value={signalingState} valueClass="text-white/70 capitalize" />
             <Row
+              label="ICE"
+              value={iceStatus ?? '—'}
+              valueClass={
+                iceStatus === 'connected' ? 'text-green-400'
+                : iceStatus === 'failed' ? 'text-red-400'
+                : 'text-yellow-400'
+              }
+            />
+            <Row
               label="RTT"
               value={stats?.rtt !== null && stats?.rtt !== undefined ? `${stats.rtt} ms` : '—'}
               valueClass={rttColor}
@@ -113,6 +124,11 @@ export function DiagnosticsOverlay({ stats, signalingState }: DiagnosticsOverlay
             <p className="text-white/25 pt-1">
               iceTransportPolicy: <span className="text-green-400">relay</span>
             </p>
+            {stats?.selectedCandidatePairUrl && (
+              <p className="text-white/25 truncate" title={stats.selectedCandidatePairUrl}>
+                via: <span className="text-white/50">{stats.selectedCandidatePairUrl}</span>
+              </p>
+            )}
           </div>
         )}
       </div>

@@ -1,3 +1,4 @@
+import { AlertTriangle } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useDiagnostics } from '../hooks/useDiagnostics'
 import type { SignalingControls } from '../hooks/useSignaling'
@@ -9,6 +10,7 @@ import type {
   TurnCredentials,
 } from '../types'
 import { resumeAudioContext } from '../utils/audioContext'
+import { checkTurnConnectivity } from '../utils/turnCheck'
 import { Controls } from './Controls'
 import { DiagnosticsOverlay } from './DiagnosticsOverlay'
 import { VideoGrid } from './VideoGrid'
@@ -23,6 +25,8 @@ interface ConferenceRoomProps {
 export function ConferenceRoom({ roomId, displayName, initialStream, onLeave }: ConferenceRoomProps) {
   const [joinError, setJoinError] = useState<string | null>(null)
   const [joining, setJoining] = useState(true)
+  const [iceBannerDismissed, setIceBannerDismissed] = useState(false)
+  const [turnWarning, setTurnWarning] = useState<string | null>(null)
 
   // ─── Meeting timer ────────────────────────────────────────────────────────
   const [elapsed, setElapsed] = useState(0)
@@ -235,6 +239,18 @@ export function ConferenceRoom({ roomId, displayName, initialStream, onLeave }: 
         turnCredsRef.current = creds
         if (cancelled) return
 
+        // 3.5. Pre-check TURN connectivity (non-blocking — warn only)
+        checkTurnConnectivity(creds).then((result) => {
+          if (cancelled) return
+          if (result === 'unreachable') {
+            console.warn('[TURN] Pre-check: no relay candidates within timeout')
+            setTurnWarning(
+              'TURN server may be unreachable from your network. ' +
+              'Video/audio might not work. Try a different network or disable VPN.'
+            )
+          }
+        })
+
         // 4. Join room — server returns existing participants
         const event = await signaling.joinRoom(roomId, displayName)
         if (cancelled) return
@@ -371,6 +387,61 @@ export function ConferenceRoom({ roomId, displayName, initialStream, onLeave }: 
         </div>
       </div>
 
+      {/* TURN unreachable warning */}
+      {turnWarning && (
+        <div className="mx-4 mt-2 p-3 bg-yellow-900/30 border border-yellow-500/30 rounded-xl flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-yellow-400 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-yellow-300 text-sm">{turnWarning}</p>
+            <button
+              onClick={() => setTurnWarning(null)}
+              className="mt-1.5 px-3 py-1 text-xs font-medium bg-white/10 hover:bg-white/20 text-white/70 rounded-md transition"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ICE failure banner */}
+      {!joining && webrtc.iceStatus === 'failed' && !iceBannerDismissed && peers.length > 0 && (
+        <IceFailureBanner
+          onDismiss={() => setIceBannerDismissed(true)}
+          onRetry={() => {
+            setIceBannerDismissed(true)
+            peers.forEach((p) => p.pc.restartIce())
+          }}
+          onBypassRelay={async () => {
+            setIceBannerDismissed(true)
+            webrtc.setRelayBypass(true)
+            webrtc.removeAllPeers()
+            pendingNamesRef.current.clear()
+            if (!signalingRef.current || !turnCredsRef.current) return
+            try {
+              const event = await signalingRef.current.joinRoom(roomId, displayName)
+              for (const participant of event.existingParticipants) {
+                const sdp = await webrtc.createOffer(
+                  participant.connectionId,
+                  participant.displayName,
+                  turnCredsRef.current,
+                  (candidate) => {
+                    signalingRef.current?.sendIceCandidate(
+                      participant.connectionId,
+                      candidate.candidate,
+                      candidate.sdpMid ?? null,
+                      candidate.sdpMLineIndex ?? null
+                    )
+                  }
+                )
+                await signalingRef.current.sendOffer(participant.connectionId, sdp)
+              }
+            } catch (err) {
+              console.error('[ConferenceRoom] Relay bypass rejoin failed:', err)
+            }
+          }}
+        />
+      )}
+
       {/* Video grid */}
       <div className="flex-1 min-h-0 overflow-hidden pb-16">
         <VideoGrid
@@ -399,7 +470,77 @@ export function ConferenceRoom({ roomId, displayName, initialStream, onLeave }: 
       <DiagnosticsOverlay
         stats={diagStats}
         signalingState={signaling.state}
+        iceStatus={webrtc.iceStatus}
       />
+    </div>
+  )
+}
+
+function IceFailureBanner({
+  onDismiss,
+  onRetry,
+  onBypassRelay,
+}: {
+  onDismiss: () => void
+  onRetry: () => void
+  onBypassRelay: () => void
+}) {
+  const [showBypass, setShowBypass] = useState(false)
+
+  return (
+    <div className="mx-4 mt-2 p-3 bg-red-900/40 border border-red-500/30 rounded-xl flex items-start gap-3">
+      <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+      <div className="flex-1 min-w-0">
+        <p className="text-red-300 text-sm font-medium">
+          Media connection failed
+        </p>
+        <p className="text-red-300/60 text-xs mt-0.5">
+          Could not establish a relay connection to the TURN server.
+          This may be caused by a firewall, VPN, or network restriction.
+        </p>
+        <div className="flex flex-wrap gap-2 mt-2">
+          <button
+            onClick={onRetry}
+            className="px-3 py-1 text-xs font-medium bg-red-600 hover:bg-red-500 text-white rounded-md transition"
+          >
+            Retry connection
+          </button>
+          <button
+            onClick={() => setShowBypass(true)}
+            className="px-3 py-1 text-xs font-medium bg-yellow-700 hover:bg-yellow-600 text-white rounded-md transition"
+          >
+            Try direct connection
+          </button>
+          <button
+            onClick={onDismiss}
+            className="px-3 py-1 text-xs font-medium bg-white/10 hover:bg-white/20 text-white/70 rounded-md transition"
+          >
+            Dismiss
+          </button>
+        </div>
+        {showBypass && (
+          <div className="mt-2 p-2 bg-yellow-900/30 border border-yellow-500/20 rounded-lg">
+            <p className="text-yellow-300/80 text-xs">
+              Direct connection bypasses the relay server. Your IP address
+              will be visible to other participants. Continue?
+            </p>
+            <div className="flex gap-2 mt-1.5">
+              <button
+                onClick={onBypassRelay}
+                className="px-3 py-1 text-xs font-medium bg-yellow-600 hover:bg-yellow-500 text-white rounded-md transition"
+              >
+                Yes, connect directly
+              </button>
+              <button
+                onClick={() => setShowBypass(false)}
+                className="px-3 py-1 text-xs font-medium bg-white/10 hover:bg-white/20 text-white/70 rounded-md transition"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

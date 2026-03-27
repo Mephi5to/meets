@@ -49,4 +49,5 @@ export interface ConnectionStats {
   candidateType: string
   bytesSent: number
   bytesReceived: number
+  selectedCandidatePairUrl?: string
 }

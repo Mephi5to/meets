@@ -45,6 +45,7 @@ export function useDiagnostics(
     let candidateType = 'unknown'
     let bytesSent = 0
     let bytesReceived = 0
+    let selectedCandidatePairUrl: string | undefined
 
     for (const s of stats.values()) {
       if (s.rtt !== null && (maxRtt === null || s.rtt > maxRtt)) maxRtt = s.rtt
@@ -54,9 +55,10 @@ export function useDiagnostics(
       candidateType = s.candidateType
       bytesSent += s.bytesSent
       bytesReceived += s.bytesReceived
+      if (s.selectedCandidatePairUrl) selectedCandidatePairUrl = s.selectedCandidatePairUrl
     }
 
-    return { rtt: maxRtt, packetLoss: maxLoss, transport, candidateType, bytesSent, bytesReceived }
+    return { rtt: maxRtt, packetLoss: maxLoss, transport, candidateType, bytesSent, bytesReceived, selectedCandidatePairUrl }
   })()
 
   return { stats, aggregated }
@@ -69,9 +71,10 @@ function parseStats(report: RTCStatsReport): ConnectionStats {
   let candidateType = 'unknown'
   let bytesSent = 0
   let bytesReceived = 0
+  let selectedCandidatePairUrl: string | undefined
 
-  // Find the active candidate pair
   let activePairId: string | null = null
+  let activeLocalCandidateId: string | null = null
 
   for (const stat of report.values()) {
     if (stat.type === 'transport') {
@@ -81,20 +84,19 @@ function parseStats(report: RTCStatsReport): ConnectionStats {
   }
 
   for (const stat of report.values()) {
-    // Candidate pair RTT
     if (stat.type === 'candidate-pair') {
       const pair = stat as RTCIceCandidatePairStats
       if (activePairId && stat.id !== activePairId) continue
       if (pair.nominated || activePairId === stat.id) {
         if (pair.currentRoundTripTime !== undefined) {
-          rtt = Math.round(pair.currentRoundTripTime * 1000) // seconds → ms
+          rtt = Math.round(pair.currentRoundTripTime * 1000)
         }
         if (pair.bytesSent) bytesSent = pair.bytesSent
         if (pair.bytesReceived) bytesReceived = pair.bytesReceived
+        activeLocalCandidateId = (pair as unknown as { localCandidateId?: string }).localCandidateId ?? null
       }
     }
 
-    // Packet loss from inbound-rtp
     if (stat.type === 'inbound-rtp') {
       const inbound = stat as RTCInboundRtpStreamStats
       if (inbound.kind === 'video') {
@@ -105,9 +107,7 @@ function parseStats(report: RTCStatsReport): ConnectionStats {
       }
     }
 
-    // Determine transport type from remote candidate
     if (stat.type === 'remote-candidate') {
-      // RTCIceCandidateStats is not in all TS versions; use a local shape
       const candidate = stat as {
         candidateType?: RTCIceCandidateType
         protocol?: string
@@ -116,13 +116,23 @@ function parseStats(report: RTCStatsReport): ConnectionStats {
       candidateType = candidate.candidateType ?? 'unknown'
 
       if (candidate.candidateType === 'relay') {
-        const url = candidate.url ?? ''
-        transport = url.startsWith('turns:') || url.includes(':443') ? 'relay' : 'relay'
+        transport = 'relay'
       } else if (candidate.candidateType === 'host' || candidate.candidateType === 'srflx') {
         transport = candidate.protocol === 'udp' ? 'udp' : 'tcp'
       }
     }
   }
 
-  return { rtt, packetLoss, transport, candidateType, bytesSent, bytesReceived }
+  // Extract the TURN URL used for the active local relay candidate
+  if (activeLocalCandidateId) {
+    for (const stat of report.values()) {
+      if (stat.id === activeLocalCandidateId) {
+        const localCand = stat as { url?: string; relayProtocol?: string }
+        if (localCand.url) selectedCandidatePairUrl = localCand.url
+        break
+      }
+    }
+  }
+
+  return { rtt, packetLoss, transport, candidateType, bytesSent, bytesReceived, selectedCandidatePairUrl }
 }
