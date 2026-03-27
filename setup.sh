@@ -86,18 +86,31 @@ if [ -n "$DOMAIN" ]; then
 
   LE_LIVE="/etc/letsencrypt/live/${DOMAIN}"
 
-  # Symlink to project directories so Docker can mount them
-  ln -sf "${LE_LIVE}/fullchain.pem" ssl/cert.pem
-  ln -sf "${LE_LIVE}/privkey.pem"   ssl/key.pem
-  ln -sf "${LE_LIVE}/fullchain.pem" coturn-certs/cert.pem
-  ln -sf "${LE_LIVE}/privkey.pem"   coturn-certs/key.pem
+  # Copy cert files (not symlink — Docker volumes can't follow host-absolute symlinks)
+  cp -L "${LE_LIVE}/fullchain.pem" ssl/cert.pem
+  cp -L "${LE_LIVE}/privkey.pem"   ssl/key.pem
+  cp -L "${LE_LIVE}/fullchain.pem" coturn-certs/cert.pem
+  cp -L "${LE_LIVE}/privkey.pem"   coturn-certs/key.pem
+  chmod 644 coturn-certs/key.pem
 
   echo "Let's Encrypt certificate installed"
 
-  # ── Auto-renewal cron with post-hook to reload services ────────────────
-  RENEW_HOOK="docker compose -f $(pwd)/docker-compose.yml restart frontend coturn"
+  # ── Auto-renewal cron with post-hook to copy certs and reload services ─
+  PROJ_DIR="$(pwd)"
+  cat > /etc/letsencrypt/renewal-hooks/deploy/meets-reload.sh << DEPLOY
+#!/bin/bash
+LE_LIVE="/etc/letsencrypt/live/${DOMAIN}"
+cp -L "\${LE_LIVE}/fullchain.pem" "${PROJ_DIR}/ssl/cert.pem"
+cp -L "\${LE_LIVE}/privkey.pem"   "${PROJ_DIR}/ssl/key.pem"
+cp -L "\${LE_LIVE}/fullchain.pem" "${PROJ_DIR}/coturn-certs/cert.pem"
+cp -L "\${LE_LIVE}/privkey.pem"   "${PROJ_DIR}/coturn-certs/key.pem"
+chmod 644 "${PROJ_DIR}/coturn-certs/key.pem"
+docker compose -f "${PROJ_DIR}/docker-compose.yml" restart frontend coturn
+DEPLOY
+  chmod +x /etc/letsencrypt/renewal-hooks/deploy/meets-reload.sh
+
   cat > /etc/cron.d/meets-cert-renew << CRON
-0 3 * * * root certbot renew --quiet --deploy-hook "${RENEW_HOOK}"
+0 3 * * * root certbot renew --quiet
 CRON
   echo "Auto-renewal cron job installed (runs daily at 03:00)"
 
@@ -117,6 +130,7 @@ else
       -subj "/CN=${VPS_IP}"
     cp ssl/cert.pem coturn-certs/cert.pem
     cp ssl/key.pem  coturn-certs/key.pem
+    chmod 644 coturn-certs/key.pem
     echo "Self-signed TLS certificate generated"
   else
     echo "TLS certificate already exists, skipping"
