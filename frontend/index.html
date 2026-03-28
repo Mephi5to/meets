@@ -22,18 +22,29 @@
     <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
     <script>
       window.__meets_diag = { htmlLoaded: true, jsStarted: false, reactMounted: false, errors: [] };
+      function __showError(title, detail, extra) {
+        var el = document.getElementById('app-loader');
+        if (!el) return;
+        el.innerHTML = '<div style="max-width:420px;padding:20px;text-align:center">' +
+          '<h2 style="font-size:20px;margin:0 0 8px">' + title + '</h2>' +
+          '<p style="opacity:0.6;font-size:13px;margin:0 0 12px">' + detail + '</p>' +
+          (extra ? '<p style="opacity:0.4;font-size:11px;word-break:break-all;margin:0">' + extra + '</p>' : '') +
+          '<button onclick="location.reload()" style="margin-top:16px;padding:8px 20px;background:#3b82f6;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px">Retry</button>' +
+          '</div>';
+      }
       window.addEventListener('error', function(e) {
         window.__meets_diag.errors.push(e.message + ' at ' + (e.filename || '') + ':' + (e.lineno || ''));
-        var el = document.getElementById('app-loader');
-        if (el) {
-          el.innerHTML = '<div style="max-width:420px;padding:20px;text-align:center">' +
-            '<h2 style="font-size:20px;margin:0 0 8px">Failed to load</h2>' +
-            '<p style="opacity:0.6;font-size:13px;margin:0 0 12px">' + e.message + '</p>' +
-            '<p style="opacity:0.4;font-size:11px;word-break:break-all;margin:0">' + (e.filename || '') + ':' + (e.lineno || '') + '</p>' +
-            '<button onclick="location.reload()" style="margin-top:16px;padding:8px 20px;background:#3b82f6;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px">Retry</button>' +
-            '</div>';
-        }
+        __showError('Failed to load', e.message, (e.filename || '') + ':' + (e.lineno || ''));
       });
+      setTimeout(function() {
+        if (!window.__meets_diag.jsStarted) {
+          __showError(
+            'Connection timeout',
+            'The app script could not be loaded. This may be caused by network restrictions.',
+            'Try using a VPN or a different browser.'
+          );
+        }
+      }, 15000);
     </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>

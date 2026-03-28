@@ -1,10 +1,31 @@
 /// <reference types="vitest" />
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
-import { viteSingleFile } from 'vite-plugin-singlefile'
+
+function stripModuleAttributes(): Plugin {
+  return {
+    name: 'strip-module-attributes',
+    enforce: 'post',
+    transformIndexHtml(html) {
+      return html
+        .replace(/<script type="module" crossorigin/g, '<script defer')
+        .replace(/<link rel="stylesheet" crossorigin/g, '<link rel="stylesheet"')
+    },
+  }
+}
 
 export default defineConfig({
-  plugins: [react(), viteSingleFile()],
+  plugins: [react(), stripModuleAttributes()],
+  build: {
+    target: 'es2020',
+    rollupOptions: {
+      output: {
+        format: 'iife',
+        entryFileNames: 'assets/[name]-[hash].js',
+        manualChunks: undefined,
+      },
+    },
+  },
   test: {
     globals: true,
     environment: 'jsdom',
