@@ -40,15 +40,26 @@ export interface WebRTCControls {
 const FORCE_RELAY = import.meta.env.VITE_FORCE_RELAY === 'true'
 
 function buildIceConfig(creds: TurnCredentials, forceAll = false): RTCConfiguration {
+  const iceServers: RTCIceServer[] = [
+    {
+      urls: creds.turnUrls,
+      username: creds.username,
+      credential: creds.credential,
+    },
+  ]
+
+  const policy = forceAll ? 'all' : (FORCE_RELAY ? 'relay' : 'all')
+
+  if (policy === 'all') {
+    iceServers.push(
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+    )
+  }
+
   return {
-    iceServers: [
-      {
-        urls: creds.turnUrls,
-        username: creds.username,
-        credential: creds.credential,
-      },
-    ],
-    iceTransportPolicy: forceAll ? 'all' : (FORCE_RELAY ? 'relay' : 'all'),
+    iceServers,
+    iceTransportPolicy: policy,
     bundlePolicy: 'max-bundle',
     rtcpMuxPolicy: 'require',
   }
